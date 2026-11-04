@@ -160,6 +160,7 @@ final class ShellModel: ObservableObject {
 
     @Published private(set) var pageButtons: [PageButton] = []
     @Published private(set) var pageRightFullscreen = false
+    @Published private(set) var pageRightOpen = false
 
     func reportRightButtons(_ raw: [String: Any]) {
         func point(_ key: String) -> PageButton? {
@@ -167,18 +168,31 @@ final class ShellModel: ObservableObject {
             return PageButton(id: key, x: CGFloat(truncating: pair[0]),
                               y: CGFloat(truncating: pair[1]))
         }
-        var splitEnabled = (raw["splitEnabled"] as? NSNumber)?.boolValue ?? true
         var next: [PageButton] = []
-        if let b = point("expand") { next.append(b) }
         if let b = point("mode") { next.append(b) }
-        if let b = point("collapse") { next.append(b) }
         if var b = point("split") {
-            b.enabled = splitEnabled
+            b.enabled = (raw["splitEnabled"] as? NSNumber)?.boolValue ?? true
             next.append(b)
         }
-        let full = (raw["fullscreen"] as? NSNumber)?.boolValue ?? false
-        if next != pageButtons { pageButtons = next }
-        if full != pageRightFullscreen { pageRightFullscreen = full }
+        // 面板收起时页面不再给位置：保留上一次的坐标，只把显隐交给 open，
+        // 这样另外两个按钮可以渐隐而不是瞬移。
+        if !next.isEmpty, next != pageButtons { pageButtons = next }
+        pageRightOpen = (raw["open"] as? NSNumber)?.boolValue ?? false
+        pageRightFullscreen = (raw["fullscreen"] as? NSNumber)?.boolValue ?? false
+    }
+
+    /// 右上角那颗固定的右侧栏开关：开着就收起，收着就展开。
+    func toggleRightSidebar() {
+        guard let webView else { return }
+        let selector = pageRightOpen
+            ? "[data-sidebar-right-toggle]" : "[data-sidebar-right-expand]"
+        webView.evaluateJavaScript(
+            "(function(){var b=document.querySelector('" + selector
+            + "'); if(b){b.click(); for(var i=1;i<=18;i++){"
+            + "setTimeout(window.__whalessApply, i*60);} return 'ok';} return 'none';})()")
+        { value, error in
+            ShellLog.write("right toggle: " + (value as? String ?? error?.localizedDescription ?? "-"))
+        }
     }
 
     /// 原生玻璃按钮点下去：回点网页里对应那个（已隐藏但可点的）按钮。

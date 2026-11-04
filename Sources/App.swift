@@ -19,6 +19,11 @@ struct WhalessApp: App {
                 .overlay(alignment: .topLeading) {
                     PageChromeButtons(model: model)
                 }
+                .overlay(alignment: .topTrailing) {
+                    RightToggleButton(model: model)
+                        .padding(.top, 12)
+                        .padding(.trailing, 12)
+                }
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
                 .ignoresSafeArea()
@@ -213,29 +218,41 @@ private struct VibrancyBackdrop: NSViewRepresentable {
     }
 }
 
-/// 右侧栏那三个入口的液态玻璃版本：位置由网页上报，点击回点网页里被隐藏的按钮。
+/// 右上角那颗固定的右侧栏开关：位置跟左上角那颗对称，不随面板开合移动。
+/// 开着就收起、收着就展开，图标不变（和左边那颗一样）。
+private struct RightToggleButton: View {
+    @ObservedObject var model: ShellModel
+
+    var body: some View {
+        if model.webContentReady {
+            Button {
+                model.toggleRightSidebar()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .frame(width: 32, height: 32)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Circle())
+            .help(model.pageRightOpen ? "收起右侧栏" : "展开右侧栏")
+        }
+    }
+}
+
+/// 右侧面板里的另外两个入口（全屏 / 分栏）：位置由网页上报，面板开合时渐显渐隐。
 private struct PageChromeButtons: View {
     @ObservedObject var model: ShellModel
 
     private func symbol(for id: String) -> String {
-        switch id {
-        case "expand": return "sidebar.right"
-        case "mode":
-            return model.pageRightFullscreen
-                ? "arrow.down.right.and.arrow.up.left"
-                : "arrow.up.left.and.arrow.down.right"
-        case "split": return "rectangle.split.2x1"
-        default: return "sidebar.right"
-        }
+        if id == "split" { return "rectangle.split.2x1" }
+        return model.pageRightFullscreen
+            ? "arrow.down.right.and.arrow.up.left"
+            : "arrow.up.left.and.arrow.down.right"
     }
 
     private func help(for id: String) -> String {
-        switch id {
-        case "expand": return "展开右侧栏"
-        case "mode": return model.pageRightFullscreen ? "退出全屏" : "全屏"
-        case "split": return "分栏"
-        default: return "收起右侧栏"
-        }
+        if id == "split" { return "分栏" }
+        return model.pageRightFullscreen ? "退出全屏" : "全屏"
     }
 
     var body: some View {
@@ -251,12 +268,13 @@ private struct PageChromeButtons: View {
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
                 .help(help(for: button.id))
-                .opacity(button.enabled ? 1 : 0.4)
-                .disabled(!button.enabled)
+                .opacity(model.pageRightOpen ? (button.enabled ? 1 : 0.4) : 0)
+                .disabled(!model.pageRightOpen || !button.enabled)
                 .offset(x: button.x - 14, y: button.y - 14)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.18), value: model.pageRightOpen)
     }
 }
 

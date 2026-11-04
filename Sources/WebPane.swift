@@ -220,12 +220,11 @@ struct WebPane: NSViewRepresentable {
             var splitEl = showPanelButtons
               ? document.querySelector('[data-dockkit-split-button]') : null;
             var data = {
-              expand: rectCenter('[data-sidebar-right-expand]'),
               mode: showPanelButtons ? rectCenter('[data-sidebar-right-mode]') : null,
-              collapse: showPanelButtons ? rectCenter('[data-sidebar-right-toggle]') : null,
               split: splitEl ? rectCenter('[data-dockkit-split-button]') : null,
               // 分栏能不能用由页面决定（单 tab 时是禁用的），原生按钮要跟着变灰。
               splitEnabled: !!(splitEl && !splitEl.disabled),
+              open: !!(panel && panel.hasAttribute('data-sidebar-right-open')),
               fullscreen: !!(panel
                 && panel.getAttribute('data-sidebar-right-panel') === 'fullscreen')
             };
