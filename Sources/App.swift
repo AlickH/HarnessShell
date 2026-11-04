@@ -14,16 +14,24 @@ struct WhalessApp: App {
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
                 .overlay(alignment: .topLeading) {
+                    // 右侧栏全屏（浏览器/终端占满窗口）时，左侧这些壳自己的按钮
+                    // 不该再压在内容上面。
                     TopButtons(model: model)
+                        .opacity(model.pageRightFullscreen ? 0 : 1)
+                        .allowsHitTesting(!model.pageRightFullscreen)
                 }
                 .overlay(alignment: .topLeading) {
                     NewSessionCapsule(model: model)
+                        .opacity(model.pageRightFullscreen ? 0 : 1)
+                        .allowsHitTesting(!model.pageRightFullscreen)
                 }
                 .overlay(alignment: .topTrailing) {
                     RightButtonsRow(model: model)
                 }
                 .overlay(alignment: .topLeading) {
                     SessionHeaderButtons(model: model)
+                        .opacity(model.pageRightFullscreen ? 0 : 1)
+                        .allowsHitTesting(!model.pageRightFullscreen)
                 }
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
