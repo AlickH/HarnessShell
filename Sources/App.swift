@@ -421,6 +421,21 @@ struct RootView: View {    @ObservedObject var model: ShellModel
                     WebPane(url: url, model: model)
                 }
                 .ignoresSafeArea()
+                // 内核起来到页面真正渲染出来之间，WebView 是空白的：
+                // 这段时间继续盖着启动界面（转菊花），等页面第一次上报再淡出。
+                .overlay {
+                    if !model.webContentReady {
+                        StatusView(title: "正在启动 Harness",
+                                   detail: "正在准备界面…",
+                                   showsSpinner: true,
+                                   logPath: nil,
+                                   retry: nil,
+                                   install: nil)
+                            .background(Color(nsColor: .textBackgroundColor))
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.25), value: model.webContentReady)
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",
                            detail: detail,
