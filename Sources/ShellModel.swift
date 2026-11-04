@@ -207,8 +207,26 @@ final class ShellModel: ObservableObject {
     @Published private(set) var pageWidth: CGFloat = 0
     /// 默认打开目标 app 的图标（网页里那颗 split 控件的 <img> 转出来的）。
     @Published private(set) var openInAppIcon: NSImage?
-    @Published private(set) var sessionMenuItems: [String] = []
-    @Published private(set) var openInAppItems: [String] = []
+    struct MenuEntry: Equatable {
+        var label: String
+        var icon: NSImage?
+    }
+
+    @Published private(set) var sessionMenuItems: [MenuEntry] = []
+    @Published private(set) var openInAppItems: [MenuEntry] = []
+
+    private func entries(from raw: Any?) -> [MenuEntry] {
+        guard let list = raw as? [[String: Any]] else { return [] }
+        return list.map { item in
+            var icon: NSImage?
+            if let dataURL = item["icon"] as? String,
+               let comma = dataURL.firstIndex(of: ","),
+               let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) {
+                icon = NSImage(data: data)
+            }
+            return MenuEntry(label: item["label"] as? String ?? "", icon: icon)
+        }
+    }
 
     func reportSessionHeader(_ raw: [String: Any]) {
         func rect(_ key: String) -> CGRect? {
@@ -237,8 +255,8 @@ final class ShellModel: ObservableObject {
     }
 
     func reportMenuLabels(_ raw: [String: Any]) {
-        sessionMenuItems = (raw["more"] as? [String]) ?? []
-        openInAppItems = (raw["apps"] as? [String]) ?? []
+        sessionMenuItems = entries(from: raw["more"])
+        openInAppItems = entries(from: raw["apps"])
     }
 
     /// 用系统 NSMenu 展示这两个按钮的菜单（菜单项来自网页，选择后回点网页条目）。
@@ -249,13 +267,17 @@ final class ShellModel: ObservableObject {
               let contentView = window.contentView else { return }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (index, title) in items.enumerated() {
-            let item = NSMenuItem(title: title,
+        for (index, entry) in items.enumerated() {
+            let item = NSMenuItem(title: entry.label,
                                   action: #selector(ShellModel.systemMenuPicked(_:)),
                                   keyEquivalent: "")
             item.target = self
             item.tag = index
             item.representedObject = kind
+            if let icon = entry.icon {
+                icon.size = NSSize(width: 16, height: 16)
+                item.image = icon
+            }
             menu.addItem(item)
         }
         // 锚点要和原生按钮的实际位置一致（不是网页那颗的位置）。

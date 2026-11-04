@@ -275,13 +275,49 @@ struct WebPane: NSViewRepresentable {
             document.documentElement.classList.add('whaless-menu-probe');
             var labels = { more: [], apps: [] };
 
-            function readItems() {
-              var items = document.querySelectorAll('[role="menu"] [role="menuitem"]');
-              var out = [];
-              for (var i = 0; i < items.length; i++) {
-                out.push(String(items[i].textContent).trim());
+            // 把「图标节点」栅格化成 PNG dataURL：img 直接画；svg 先转 data URL 再画。
+            function rasterize(source, width, height) {
+              var canvas = document.createElement('canvas');
+              canvas.width = 64;
+              canvas.height = 64;
+              canvas.getContext('2d').drawImage(source, 0, 0, 64, 64);
+              return canvas.toDataURL('image/png');
+            }
+
+            function itemIcon(item, done) {
+              var img = item.querySelector('img');
+              if (img && img.complete && img.naturalWidth > 0) {
+                try { done(rasterize(img, 64, 64)); return; } catch (e) {}
               }
-              return out;
+              var svg = item.querySelector('svg');
+              if (!svg) { done(null); return; }
+              try {
+                var xml = new XMLSerializer().serializeToString(svg);
+                var url = 'data:image/svg+xml;base64,'
+                  + btoa(unescape(encodeURIComponent(xml)));
+                var image = new Image();
+                image.onload = function () {
+                  try { done(rasterize(image, 64, 64)); } catch (e) { done(null); }
+                };
+                image.onerror = function () { done(null); };
+                image.src = url;
+              } catch (e) { done(null); }
+            }
+
+            function readItems(done) {
+              var nodes = document.querySelectorAll('[role="menu"] [role="menuitem"]');
+              var entries = new Array(nodes.length);
+              var remaining = nodes.length;
+              if (!remaining) { done([]); return; }
+              for (var i = 0; i < nodes.length; i++) {
+                (function (node, index) {
+                  itemIcon(node, function (icon) {
+                    entries[index] = { label: String(node.textContent).trim(), icon: icon };
+                    remaining -= 1;
+                    if (remaining === 0) { done(entries); }
+                  });
+                })(nodes[i], i);
+              }
             }
 
             function finish() {
@@ -297,9 +333,11 @@ struct WebPane: NSViewRepresentable {
               queue.push(function (next) {
                 more.click();
                 setTimeout(function () {
-                  labels.more = readItems();
-                  more.click();
-                  setTimeout(next, 80);
+                  readItems(function (entries) {
+                    labels.more = entries;
+                    more.click();
+                    setTimeout(next, 80);
+                  });
                 }, 160);
               });
             }
@@ -307,9 +345,11 @@ struct WebPane: NSViewRepresentable {
               queue.push(function (next) {
                 chevron.click();
                 setTimeout(function () {
-                  labels.apps = readItems();
-                  chevron.click();
-                  setTimeout(next, 80);
+                  readItems(function (entries) {
+                    labels.apps = entries;
+                    chevron.click();
+                    setTimeout(next, 80);
+                  });
                 }, 160);
               });
             }
