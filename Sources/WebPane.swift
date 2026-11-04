@@ -489,16 +489,6 @@ struct WebPane: NSViewRepresentable {
               // 落位后原生胶囊接上时形状一致，不会"从圆角矩形跳到胶囊"。
               '[class*="sidebarCol"] [class*="newSession"]'
                 + '{border-radius:999px !important}',
-              // 输入框外框（composer 那张大圆角卡片）：半透明 + 背景模糊，
-              // 做出玻璃卡片质感；描边改成和玻璃一致的发丝边 + 顶部一道内高光。
-              '[class*="composerStack"] [class*="card"]'
-                + '{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent)'
-                + ' !important;'
-                + ' -webkit-backdrop-filter:blur(24px) saturate(1.6);'
-                + ' backdrop-filter:blur(24px) saturate(1.6);'
-                + ' border-color:color-mix(in srgb,var(--dsw-alias-border-l3) 80%,transparent)'
-                + ' !important;'
-                + ' box-shadow:inset 0 1px 0 rgba(255,255,255,.06) !important}',
               // 右侧栏引导区那几张大按钮：半透明底 + 背景模糊，做出玻璃卡片的感觉
               // （面板本身仍是实底，所以是"透玻璃质感"而不是真透桌面）。
               '[data-sidebar-right-guide-entry],'
