@@ -70,6 +70,30 @@ final class ShellModel: ObservableObject {
 
     // MARK: - 侧栏
 
+    /// 新会话：点应用自己的「新会话」入口（先按 aria-label，再按文字兜底）。
+    func newSession() {
+        guard let webView else { return }
+        webView.evaluateJavaScript("""
+            (function () {
+              var nodes = document.querySelectorAll('button,[role="button"],a');
+              for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                var label = (el.getAttribute('aria-label') || '').trim();
+                var text = (el.textContent || '').trim();
+                if (label.indexOf('新会话') >= 0 || label.indexOf('New session') >= 0
+                    || text.indexOf('新会话') === 0 || text.indexOf('New session') === 0) {
+                  el.click();
+                  return 'ok';
+                }
+              }
+              return 'not-found';
+            })()
+            """) { value, error in
+            let result = value as? String ?? error?.localizedDescription ?? "-"
+            ShellLog.write("new session: \(result)")
+        }
+    }
+
     /// 原生按钮接管折叠：代 web 端那个（已被隐藏的）按钮点一下。
     ///
     /// 不能直接改宽度——主栏宽度是应用按"侧栏占多少"算出来的，壳只负责触发它的状态机。

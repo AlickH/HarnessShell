@@ -14,7 +14,7 @@ struct WhalessApp: App {
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
                 .toolbar {
-                    ToolbarItem(placement: .navigation) {
+                    ToolbarItemGroup(placement: .navigation) {
                         Button {
                             model.toggleSidebar()
                         } label: {
@@ -22,6 +22,14 @@ struct WhalessApp: App {
                         }
                         .buttonStyle(.glass)
                         .help("收起 / 展开侧边栏")
+
+                        Button {
+                            model.newSession()
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .buttonStyle(.glass)
+                        .help("新会话")
                     }
                 }
                 .background(WindowAccessor { model.adopt($0) })
