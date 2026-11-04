@@ -65,8 +65,8 @@ enum KernelUpdate {
         }
         DispatchQueue.global(qos: .userInitiated).async {
             let result = run(URL(fileURLWithPath: npm),
-                             ["install", "-g", "\(packageName)@latest"],
-                             timeout: 300)
+                             installArguments(npm: npm),
+                             timeout: 600)
             guard let result else {
                 DispatchQueue.main.async { completion(.failure(UpdateFailure(message: "npm 没能启动。"))) }
                 return
@@ -110,6 +110,21 @@ enum KernelUpdate {
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let range = Range(match.range, in: text) else { return nil }
         return String(text[range])
+    }
+
+    /// npm 11 起默认不再执行依赖的 postinstall。内核里有四个包靠它编译/准备：
+    /// `node-pty`、`koffi`（原生模块）、`@deepseek-ai/dsh-subprocess-local`（spawn helper）、
+    /// `protobufjs`。不加这个参数装出来的内核是"能启动但工具会坏"的半成品，
+    /// 所以按 npm 大版本决定要不要带。
+    private static func installArguments(npm: String) -> [String] {
+        var arguments = ["install", "-g"]
+        if let version = run(URL(fileURLWithPath: npm), ["--version"], timeout: 30),
+           let major = Int(version.output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ".").first ?? ""),
+           major >= 11 {
+            arguments.append("--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs")
+        }
+        arguments.append("\(packageName)@latest")
+        return arguments
     }
 
     private static func npmPath() -> String? {
