@@ -18,6 +18,9 @@ final class WindowKeeper: NSObject, NSWindowDelegate {
         guard window.delegate !== self else { return }
         original = window.delegate
         window.delegate = self
+        // 只要一个窗口：既不许合并成标签页，也不参与窗口状态恢复（否则重启会多开）。
+        window.tabbingMode = .disallowed
+        window.isRestorable = false
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

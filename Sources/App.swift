@@ -7,7 +7,9 @@ struct WhalessApp: App {
     @StateObject private var model = ShellModel.shared
 
     var body: some Scene {
-        WindowGroup("Whaless") {
+        // 用 Window 而不是 WindowGroup：WindowGroup 每次"重新打开"都会新建一个窗口，
+        // 系统再把它们合并成标签页。Window 本来就是单实例场景，不会多开。
+        Window("Whaless", id: "main") {
             RootView(model: model)
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
@@ -55,12 +57,19 @@ struct WhalessApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// 这一版只要一个窗口：关掉系统的窗口标签页功能。
+    /// 必须在窗口创建之前设，放到 didFinishLaunching 就晚了。
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             guard let window = NSApp.windows.first else { return }
-            ShellLog.write("window: fullSize=\(window.styleMask.contains(.fullSizeContentView)) "
+            ShellLog.write("window: tabs=\(window.tabbingMode == .disallowed ? "off" : "on") "
+                + "fullSize=\(window.styleMask.contains(.fullSizeContentView)) "
                 + "transparentTitlebar=\(window.titlebarAppearsTransparent) "
                 + "titleHidden=\(window.titleVisibility != .visible)")
         }
@@ -71,11 +80,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    /// 点 Dock 图标时自己把窗口拿出来，返回 false 阻止 AppKit 按默认行为再开一个——
+    /// 那样会多出一个 WindowGroup 窗口，被系统合并成标签页。
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             ShellModel.shared.showWindow()
-            ShellLog.write("window: 从 Dock 重新显示")
         }
+        ShellLog.write("window: reopen flag=\(flag) tabs=\(ShellModel.shared.window?.tabbedWindows?.count ?? 0)")
         return true
     }
 

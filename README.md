@@ -70,6 +70,14 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 
 拖拽上传、剪贴板不需要额外代码（HTML5 事件和 `navigator.clipboard` 原生可用）。
 
+## 单窗口
+
+- 场景用 `Window` 而不是 `WindowGroup`：后者每次"重新打开 App"都会新建一个窗口，
+  系统再把它们合并成标签页——这就是"点一下多出一个标签"的来源。
+- `NSWindow.allowsAutomaticWindowTabbing = false`（必须在 `willFinishLaunching` 里设，
+  等窗口建好就晚了）+ 每个窗口 `tabbingMode = .disallowed`。
+- `isRestorable = false`，避免重启时按上次状态多开窗口。
+
 ## 关窗不退出
 
 关窗口只是把窗口藏起来，内核继续跑：
