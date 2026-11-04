@@ -37,27 +37,68 @@ struct WebPane: NSViewRepresentable {
         return webView
     }
 
-    /// 让页面自己避开窗口左上角的三个按钮。
+    /// 让页面自己避开窗口左上角的三个按钮，同时让左右两栏的背景一直铺到窗口顶端。
     ///
-    /// 用 `#root` 而不是 `body`：`body` 上还有背景色，给它加 padding 会在最上面留一条
-    /// 和页面不同色的带子；`#root` 配合 border-box，内容整体下移、高度不变，不会溢出。
+    /// 关键是**把内距加在两栏自己身上**（`sidebarCol` / `centerCol`），而不是它们的
+    /// 共同祖先：背景会覆盖 padding 盒，于是侧栏的灰底、主区的白底都能延伸到红绿灯
+    /// 那一行，只有内容整体下移——看起来就像页面本来就长这样，而不是有一条标题栏。
+    ///
+    /// 类名带 CSS Modules 的哈希前缀（`pI_x6G_sidebarCol`），所以按后缀匹配；
+    /// 万一将来改了名，退回到给 `#root` 加内距（会露出 body 底色，但至少不会压住按钮）。
     private static func titlebarScript(inset: CGFloat) -> WKUserScript {
-        let css = "#root{padding-top:\(Int(inset))px !important;box-sizing:border-box !important;}"
-        let literal = (try? JSONSerialization.data(withJSONObject: [css]))
-            .flatMap { String(data: $0, encoding: .utf8) }?
-            .dropFirst().dropLast() ?? "\"\""
         let source = """
         (function () {
-          var css = \(literal);
-          function apply() {
-            if (document.getElementById('whaless-titlebar-inset')) { return; }
-            var style = document.createElement('style');
-            style.id = 'whaless-titlebar-inset';
-            style.textContent = css;
-            (document.head || document.documentElement).appendChild(style);
+          var inset = \(Int(inset));
+          var styled = new WeakSet();
+
+          function columns() {
+            return document.querySelectorAll('[class*="sidebarCol"],[class*="centerCol"],[class*="rightbarCol"]');
           }
+
+          var rootStyled = false;
+
+          function clearRoot() {
+            var root = document.getElementById('root');
+            if (!root || !rootStyled) { return; }
+            root.style.removeProperty('padding-top');
+            root.style.removeProperty('box-sizing');
+            rootStyled = false;
+          }
+
+          function apply() {
+            var nodes = columns();
+            if (!nodes.length) {
+              // 启动画面阶段还没有两栏，只能先退到底座上；等真界面出现要把它撤掉，
+              // 否则两处内距叠加，内容会缩进两次。
+              var root = document.getElementById('root');
+              if (!root || rootStyled) { return; }
+              root.style.setProperty('padding-top', inset + 'px', 'important');
+              root.style.setProperty('box-sizing', 'border-box', 'important');
+              rootStyled = true;
+              return;
+            }
+            clearRoot();
+            for (var i = 0; i < nodes.length; i++) {
+              var node = nodes[i];
+              if (styled.has(node)) { continue; }
+              node.style.setProperty('padding-top', inset + 'px', 'important');
+              node.style.setProperty('box-sizing', 'border-box', 'important');
+              styled.add(node);
+            }
+          }
+
+          var scheduled = false;
+          function schedule() {
+            if (scheduled) { return; }
+            scheduled = true;
+            requestAnimationFrame(function () { scheduled = false; apply(); });
+          }
+
           apply();
           document.addEventListener('DOMContentLoaded', apply);
+          window.addEventListener('load', apply);
+          // 应用是运行时挂载的，节点会被整体替换，所以盯着变化重新加。
+          new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
         })();
         """
         return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
@@ -142,10 +183,12 @@ struct WebPane: NSViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     webView.evaluateJavaScript("""
                         (function () {
+                          var col = document.querySelector('[class*="sidebarCol"]');
                           var root = document.getElementById('root');
-                          var pad = root ? getComputedStyle(root).paddingTop : 'no-root';
-                          var text = document.body ? document.body.innerText.slice(0, 40) : '';
-                          return document.title + ' | pad=' + pad + ' | ' + text;
+                          var text = document.body ? document.body.innerText.slice(0, 30) : '';
+                          return 'pad(col)=' + (col ? getComputedStyle(col).paddingTop : 'no-col')
+                            + ' pad(root)=' + (root ? getComputedStyle(root).paddingTop : '-')
+                            + ' | ' + text;
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")
