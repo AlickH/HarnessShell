@@ -408,6 +408,13 @@ private struct RightButtonsRow: View {
 struct RootView: View {    @ObservedObject var model: ShellModel
 
     var body: some View {
+        GeometryReader { geo in
+            content(width: geo.size.width)
+        }
+    }
+
+    @ViewBuilder
+    private func content(width: CGFloat) -> some View {
         Group {
             switch model.phase {
             case .ready(let url):
@@ -430,7 +437,8 @@ struct RootView: View {    @ObservedObject var model: ShellModel
                                    showsSpinner: true,
                                    logPath: nil,
                                    retry: nil,
-                                   install: nil)
+                                   install: nil,
+                                   availableWidth: width)
                             .background(Color(nsColor: .textBackgroundColor))
                             .transition(.opacity)
                     }
@@ -495,23 +503,31 @@ struct StatusView: View {
     ]
     private let tipTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
+    var availableWidth: CGFloat = 1200
+
     var body: some View {
-        VStack(spacing: 18) {
+        let wide = availableWidth >= 900
+        let logoWidth = min(max(availableWidth * 0.34, 280), 520)
+        return content(wide: wide, logoWidth: logoWidth)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func content(wide: Bool, logoWidth: CGFloat) -> some View {
+        VStack(spacing: wide ? 22 : 16) {
             // 品牌 wordmark（从桌面端 welcome 窗口抽出来的同一份 SVG）。
             if let brand = brandWordmark(dark: colorScheme == .dark) {
                 Image(nsImage: brand)
                     .resizable()
                     .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 360)
+                    .frame(width: logoWidth, height: logoWidth * 40 / 472)
                     .padding(.bottom, 6)
             }
             if showsSpinner {
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(wide ? .regular : .small)
             }
             Text(title)
-                .font(.headline)
+                .font(wide ? .title3 : .headline)
             if showsSpinner {
                 Text(tips[tipIndex % tips.count])
                     .font(.callout)
@@ -524,7 +540,6 @@ struct StatusView: View {
                     .onReceive(tipTimer) { _ in tipIndex += 1 }
             } else {
                 Text(detail)
-            Text(detail)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
