@@ -161,6 +161,7 @@ private struct TopButtons: View {
                         Image(systemName: "sidebar.left")
                             .frame(width: 36, height: 36)
                             .font(.system(size: 16, weight: .medium))
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Circle())
@@ -175,6 +176,7 @@ private struct TopButtons: View {
                             Image(systemName: "plus.message")
                                 .frame(width: 36, height: 36)
                                 .font(.system(size: 16, weight: .medium))
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                         .glassEffect(.regular.interactive(), in: Circle())
@@ -235,6 +237,7 @@ private struct SessionHeaderButtons: View {
             Image(systemName: symbol)
                 .frame(width: size, height: size)
                 .font(.system(size: 16, weight: .medium))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: Circle())
@@ -309,6 +312,7 @@ private struct RightButtonsRow: View {
             Image(systemName: symbol)
                 .frame(width: 36, height: 36)
                 .font(.system(size: 16, weight: .medium))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: Circle())
@@ -339,6 +343,7 @@ private struct RightButtonsRow: View {
                     Image(systemName: "sidebar.right")
                         .frame(width: 36, height: 36)
                         .font(.system(size: 16, weight: .medium))
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
