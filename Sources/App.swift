@@ -253,7 +253,9 @@ private struct SessionHeaderButtons: View {
                     button(symbol: "ellipsis", help: "更多操作", menu: "more")
                 }
             }
-            .offset(x: right - 12 - size * 2 - spacing, y: 12)
+            // 右侧栏收起时，右上角那颗开关也占着窗口右边这一格，给它留出位置。
+            .offset(x: right - 12 - size * 2 - spacing
+                    - (model.pageRightOpen ? 0 : size + spacing), y: 12)
         }
     }
 }
