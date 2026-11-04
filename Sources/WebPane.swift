@@ -163,10 +163,15 @@ struct WebPane: NSViewRepresentable {
               darkQuery.addListener(onChange);
             }
           }
-          // 原生推系统色过来（十六进制），内容区的底就用它。
+          // 原生推系统色过来（十六进制）：内容区底色 = macOS 系统色，跟系统外观走。
+          // 内容区很多内层容器都吃 `--dsw-alias-bg-base`，所以直接改这个主题 token；
+          // 同时留一份 --whaless-content-bg 给动画期间 frame 补底用。
           window.__whalessContentBg = function (value) {
             if (!value) { return; }
             document.documentElement.style.setProperty('--whaless-content-bg', value);
+            if (document.body) {
+              document.body.style.setProperty('--dsw-alias-bg-base', value, 'important');
+            }
           };
 
           // 页面主题单独上报：原生毛玻璃材质跟着它走。不能等侧栏 DOM——
@@ -249,11 +254,7 @@ struct WebPane: NSViewRepresentable {
                 + ' !important}',
               '[class*="sidebarCol"] > * > *{background:transparent !important}',
               // 其它区域保持实色：右侧栏在 web 模式下自己不带底，不补的话打开时会透。
-              // 内容区底色改用系统色（原生按外观推过来的 --whaless-content-bg）：
-              // 要求"跟系统外观走"，而不是页面主题自己的亮暗值。侧栏那层不动（玻璃）。
-              '[class*="centerCol"],[class*="bottomRow"],[class*="rightbarCol"]'
-                + '{background:var(--whaless-content-bg,var(--dsw-alias-bg-base))'
-                + ' !important}',
+              '[class*="rightbarCol"]{background:var(--dsw-alias-bg-base) !important}',
               // 会话列表底部那条渐隐是"渐隐到侧栏实色底"的：侧栏改玻璃之后它
               // 会变成一条盖住材质的实色条，直接去掉（列表本身滚动不受影响）。
               '[class*="sidebarCol"] [class*="_fade"]{display:none !important}',
