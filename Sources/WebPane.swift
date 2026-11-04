@@ -16,6 +16,10 @@ struct WebPane: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
 
+        // 标题栏被隐藏后内容铺到最上面，给 #root 让出红绿灯的高度：
+        // 上面那条就露出页面自己的背景色（body 的 #fff / #151517），看起来是同一个界面。
+        configuration.userContentController.addUserScript(Self.titlebarScript(inset: 28))
+
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -31,6 +35,32 @@ struct WebPane: NSViewRepresentable {
         ShellLog.write("load \(ShellLog.redact(url))")
         webView.load(URLRequest(url: url))
         return webView
+    }
+
+    /// 让页面自己避开窗口左上角的三个按钮。
+    ///
+    /// 用 `#root` 而不是 `body`：`body` 上还有背景色，给它加 padding 会在最上面留一条
+    /// 和页面不同色的带子；`#root` 配合 border-box，内容整体下移、高度不变，不会溢出。
+    private static func titlebarScript(inset: CGFloat) -> WKUserScript {
+        let css = "#root{padding-top:\(Int(inset))px !important;box-sizing:border-box !important;}"
+        let literal = (try? JSONSerialization.data(withJSONObject: [css]))
+            .flatMap { String(data: $0, encoding: .utf8) }?
+            .dropFirst().dropLast() ?? "\"\""
+        let source = """
+        (function () {
+          var css = \(literal);
+          function apply() {
+            if (document.getElementById('whaless-titlebar-inset')) { return; }
+            var style = document.createElement('style');
+            style.id = 'whaless-titlebar-inset';
+            style.textContent = css;
+            (document.head || document.documentElement).appendChild(style);
+          }
+          apply();
+          document.addEventListener('DOMContentLoaded', apply);
+        })();
+        """
+        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}
@@ -110,7 +140,14 @@ struct WebPane: NSViewRepresentable {
             // 白屏排查：把页面标题和首屏文字记下来，能立刻区分"没加载"和"加载了但渲染空"。
             for delay in [0.0, 6.0] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    webView.evaluateJavaScript("document.title + ' | ' + (document.body ? document.body.innerText.slice(0, 60) : '')") { value, _ in
+                    webView.evaluateJavaScript("""
+                        (function () {
+                          var root = document.getElementById('root');
+                          var pad = root ? getComputedStyle(root).paddingTop : 'no-root';
+                          var text = document.body ? document.body.innerText.slice(0, 40) : '';
+                          return document.title + ' | pad=' + pad + ' | ' + text;
+                        })()
+                        """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")
                         ShellLog.write("rendered(+\(Int(delay))s) \(text)")
                     }

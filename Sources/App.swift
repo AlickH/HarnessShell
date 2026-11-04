@@ -13,6 +13,8 @@ struct WhalessApp: App {
                 .onAppear { model.start() }
         }
         .defaultSize(width: 1200, height: 840)
+        // 去掉标题栏：内容铺到窗口边缘，红绿灯浮在页面之上。
+        .windowStyle(.hiddenTitleBar)
         .commands {
             // 单页应用不需要「新建窗口」
             CommandGroup(replacing: .newItem) {}
@@ -44,6 +46,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard let window = NSApp.windows.first else { return }
+            ShellLog.write("window: fullSize=\(window.styleMask.contains(.fullSizeContentView)) "
+                + "transparentTitlebar=\(window.titlebarAppearsTransparent) "
+                + "titleHidden=\(window.titleVisibility != .visible)")
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -64,6 +72,12 @@ struct RootView: View {
             switch model.phase {
             case .ready(let url):
                 WebPane(url: url, model: model)
+                    .ignoresSafeArea()
+                    // 红绿灯那一行现在是页面自己的背景，拖动窗口靠这层透明区域。
+                    .overlay(alignment: .top) {
+                        DragStrip()
+                            .frame(height: 28)
+                    }
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",
                            detail: detail,
