@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 
 @main
 struct WhalessApp: App {
@@ -519,22 +518,6 @@ struct DeepySprite: View {
         }
         return NSImage(contentsOf: url)
     }
-}
-
-/// 启动页的 Deepy：用 WKWebView 加载本地 HTML，CSS 规则和皮肤同构
-/// （`Resources/deepy-splash.html`），这样帧的裁切/缩放完全交给浏览器，
-/// 不会像 SwiftUI 里那样因为网格假设错位而串帧。
-struct DeepySplashView: NSViewRepresentable {
-    func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        view.setValue(false, forKey: "drawsBackground")
-        if let html = Bundle.main.url(forResource: "deepy-splash", withExtension: "html"),
-           let root = Bundle.main.resourceURL {
-            view.loadFileURL(html, allowingReadAccessTo: root)
-        }
-        return view
-    }
-    func updateNSView(_ view: WKWebView, context: Context) {}
 }
 
 /// 品牌 wordmark：SVG 里填的是 `var(--dsw-alias-label-primary)` 这类变量，
