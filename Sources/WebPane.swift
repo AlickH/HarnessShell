@@ -79,10 +79,22 @@ struct WebPane: NSViewRepresentable {
             rootStyled = false;
           }
 
+          // 折叠按钮只在展开态隐藏：万一当前就是折叠态，还得留个入口能展开回来。
+          function applySidebar(inset) {
+            var side = document.querySelector('[class*="sidebarCol"]');
+            if (!side) { return; }
+            var wide = side.getBoundingClientRect().width > 200;
+            setPad(side, wide ? 0 : inset);
+            var toggles = side.querySelectorAll('[class*="toggle"]');
+            for (var i = 0; i < toggles.length; i++) {
+              toggles[i].style.setProperty('display', wide ? 'none' : '', wide ? 'important' : '');
+            }
+          }
+
           function apply() {
             var center = document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]');
-            var side = document.querySelectorAll('[class*="sidebarCol"]');
-            if (!center.length && !side.length) {
+            var side = document.querySelector('[class*="sidebarCol"]');
+            if (!center.length && !side) {
               // 启动画面阶段还没有两栏，先退到底座；真界面出现后撤掉，避免叠加。
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
@@ -93,7 +105,7 @@ struct WebPane: NSViewRepresentable {
             }
             clearRoot();
             for (var i = 0; i < center.length; i++) { setPad(center[i], 0); }
-            for (var j = 0; j < side.length; j++) { setPad(side[j], inset); }
+            applySidebar(inset);
           }
 
           var scheduled = false;
@@ -196,10 +208,12 @@ struct WebPane: NSViewRepresentable {
                         (function () {
                           var col = document.querySelector('[class*="sidebarCol"]');
                           var text = document.body ? document.body.innerText.slice(0, 30) : '';
+                          var sideEl = document.querySelector('[class*="sidebarCol"]');
                           var center = document.querySelector('[class*="centerCol"]');
                           var first = center && center.firstElementChild
                             ? Math.round(center.firstElementChild.getBoundingClientRect().top) : '-';
-                          return 'pad(side)=' + (col ? getComputedStyle(col).paddingTop : 'no-col')
+                          return 'pad(side)=' + (sideEl ? getComputedStyle(sideEl).paddingTop : '-')
+                            + ' w=' + (sideEl ? Math.round(sideEl.getBoundingClientRect().width) : '-')
                             + ' pad(center)=' + (center ? getComputedStyle(center).paddingTop : '-')
                             + ' centerTop=' + first + ' | ' + text;
                         })()
