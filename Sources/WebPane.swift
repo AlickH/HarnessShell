@@ -56,9 +56,16 @@ struct WebPane: NSViewRepresentable {
 
           // 不要用 WeakSet 记"加过没有"：React 重渲染会覆盖 inline style，
           // 记过账的节点会被跳过，内距就悄悄丢了。按实际计算值判断才稳。
-          function ensure(node) {
-            if (getComputedStyle(node).paddingTop === inset + 'px') { return; }
-            node.style.setProperty('padding-top', inset + 'px', 'important');
+          // 主栏不要内距：顶栏那排按钮要和交通灯齐平。
+          // 侧栏必须留 28px：它的展开按钮正好在交通灯下面，上移就会被按钮盖住点不到。
+          function setPad(node, px) {
+            if (px === 0) {
+              node.style.removeProperty('padding-top');
+              node.style.removeProperty('box-sizing');
+              return;
+            }
+            if (getComputedStyle(node).paddingTop === px + 'px') { return; }
+            node.style.setProperty('padding-top', px + 'px', 'important');
             node.style.setProperty('box-sizing', 'border-box', 'important');
           }
 
@@ -73,10 +80,10 @@ struct WebPane: NSViewRepresentable {
           }
 
           function apply() {
-            var nodes = columns();
-            if (!nodes.length) {
-              // 启动画面阶段还没有两栏，只能先退到底座上；真界面出现后要撤掉，
-              // 否则两处内距叠加，内容会缩进两次。
+            var center = document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]');
+            var side = document.querySelectorAll('[class*="sidebarCol"]');
+            if (!center.length && !side.length) {
+              // 启动画面阶段还没有两栏，先退到底座；真界面出现后撤掉，避免叠加。
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
               root.style.setProperty('padding-top', inset + 'px', 'important');
@@ -85,7 +92,8 @@ struct WebPane: NSViewRepresentable {
               return;
             }
             clearRoot();
-            for (var i = 0; i < nodes.length; i++) { ensure(nodes[i]); }
+            for (var i = 0; i < center.length; i++) { setPad(center[i], 0); }
+            for (var j = 0; j < side.length; j++) { setPad(side[j], inset); }
           }
 
           var scheduled = false;
@@ -188,8 +196,12 @@ struct WebPane: NSViewRepresentable {
                         (function () {
                           var col = document.querySelector('[class*="sidebarCol"]');
                           var text = document.body ? document.body.innerText.slice(0, 30) : '';
-                          return 'pad(col)=' + (col ? getComputedStyle(col).paddingTop : 'no-col')
-                            + ' | ' + text;
+                          var center = document.querySelector('[class*="centerCol"]');
+                          var first = center && center.firstElementChild
+                            ? Math.round(center.firstElementChild.getBoundingClientRect().top) : '-';
+                          return 'pad(side)=' + (col ? getComputedStyle(col).paddingTop : 'no-col')
+                            + ' pad(center)=' + (center ? getComputedStyle(center).paddingTop : '-')
+                            + ' centerTop=' + first + ' | ' + text;
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")
