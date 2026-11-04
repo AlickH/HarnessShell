@@ -257,7 +257,7 @@ private struct NewSessionCapsule: View {
                 .frame(width: width, height: model.newSessionHeight)
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .modifier(FlatPill())
             .offset(x: 12, y: top)
             .allowsHitTesting(true)
         }
@@ -279,7 +279,7 @@ private struct RightButtonsRow: View {
                 .font(.system(size: 16, weight: .medium))
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
+        .modifier(FlatPill())
         .help(help)
         .opacity(model.pageRightOpen ? (enabled ? 1 : 0.4) : 0)
         .disabled(!model.pageRightOpen || !enabled)
@@ -309,7 +309,7 @@ private struct RightButtonsRow: View {
                         .font(.system(size: 16, weight: .medium))
                 }
                 .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
+                .modifier(FlatPill())
                 .help(model.pageRightOpen ? "收起右侧栏" : "展开右侧栏")
             }
             .padding(.top, 12)
