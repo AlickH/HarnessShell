@@ -274,9 +274,9 @@ final class ShellModel: ObservableObject {
             item.target = self
             item.tag = index
             item.representedObject = kind
-            if let icon = entry.icon {
-                icon.size = NSSize(width: 16, height: 16)
-                item.image = icon
+            if let image = menuImage(kind: kind, entry: entry, index: index) {
+                image.size = NSSize(width: 16, height: 16)
+                item.image = image
             }
             menu.addItem(item)
         }
@@ -297,6 +297,20 @@ final class ShellModel: ObservableObject {
         DispatchQueue.main.async {
             menu.popUp(positioning: nil, at: anchor, in: contentView)
         }
+    }
+
+    /// 菜单项图标：网页抓到的图标留给应用列表；「更多操作」那几项用 SF Symbol。
+    private func menuImage(kind: String, entry: MenuEntry, index: Int) -> NSImage? {
+        guard kind == "more" else { return entry.icon }
+        let symbol: String
+        if entry.label.contains("下载") {
+            symbol = "square.and.arrow.down"
+        } else if entry.label.contains("反馈") {
+            symbol = "paperplane"
+        } else {
+            return entry.icon
+        }
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
     }
 
     @objc private func systemMenuPicked(_ sender: NSMenuItem) {
