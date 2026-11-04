@@ -310,23 +310,6 @@ private struct SessionHeaderButtons: View {
     }
 }
 
-/// 内容区的系统色底：网页那边把内容区背景去掉了（透明），这层由原生铺在
-/// WKWebView 下面 —— 颜色就是 macOS 的系统内容色，随外观切换。
-/// 从侧栏右缘开始铺，侧栏那块保持透玻璃。
-private struct ContentBackplate: View {
-    @ObservedObject var model: ShellModel
-
-    var body: some View {
-        GeometryReader { geo in
-            Rectangle()
-                .fill(Color(nsColor: .textBackgroundColor))
-                .frame(width: max(0, geo.size.width - model.sidebarWidth))
-                .offset(x: model.sidebarWidth)
-        }
-        .ignoresSafeArea()
-    }
-}
-
 /// 侧栏顶部的「新会话」：原生液态玻璃胶囊，盖在网页那颗（已隐藏）的位置上。
 /// 宽度跟着侧栏宽度实时变，收放动画期间交给快照显示，自己先退场。
 private struct NewSessionCapsule: View {
