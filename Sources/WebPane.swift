@@ -235,6 +235,14 @@ struct WebPane: NSViewRepresentable {
               // 复制品的位移一律由 JS 逐帧写入（内联 !important），这里不能再给
               // transition，否则每帧的修正会被过渡吞掉、永远追不上主栏。
               '[data-whaless-ghost]{transition:none !important;visibility:visible !important}',
+              // 影子 frame（复制品的祖先）只是个"状态冻结器"：几何全部由内联样式给死，
+              // 皮肤给它加的装饰（伪元素、背景、边框）一律抹掉，别让它多画东西。
+              '[data-whaless-ghost-frame]{transition:none !important;'
+                + 'background:none !important;border:0 !important;'
+                + 'box-shadow:none !important;grid-template-columns:none !important}',
+              '[data-whaless-ghost-frame]:before,'
+                + '[data-whaless-ghost-frame]:after'
+                + '{content:none !important;display:none !important}',
               // 动画期间真身让位给冻结的那一份（复制品负责画面）。
               // :not 排除复制品——它自己类名里也有 sidebarCol，不然会被一起藏掉。
               '[data-whaless-frozen] [class*="sidebarCol"]:not([data-whaless-ghost])'
@@ -355,15 +363,17 @@ struct WebPane: NSViewRepresentable {
           // 记下拍摄时的主题指纹，复用前对一下，对不上就丢掉、退回真身滑入。
           var savedTheme = '';
 
+          // 指纹只挑"页面自己的主题信号"：深色标记、body 的 class、body 底色。
+          // 不能带 html 的 class —— 壳自己会往上挂 `whaless-rail`（apply 里跟着
+          // 折叠状态 toggle），折叠/展开一翻转指纹就变，于是每次展开都把那张
+          // 宽版快照当成"换主题了"扔掉，退回真身自己滑 —— 收起有快照、展开没快照，
+          // 两个方向的观感自然对不上（元素和背景各走各的）。
           function themeKey() {
-            var html = document.documentElement;
             var body = document.body;
-            var bg = body ? getComputedStyle(body).backgroundColor : '';
-            // 不看 html 的 style：那上面挂着自己的 --whaless-* 变量，动画期间会变，
-            // 会把自己误判成"主题变了"。
-            return (html.getAttribute('class') || '') + '|'
-              + (html.getAttribute('data-theme') || '') + '|'
-              + (document.body ? document.body.className : '') + '|' + bg;
+            if (!body) { return ''; }
+            return (body.className || '') + '|'
+              + (body.hasAttribute('data-ds-dark-theme') ? '1' : '0') + '|'
+              + getComputedStyle(body).backgroundColor;
           }
 
           function apply() {
@@ -488,6 +498,84 @@ struct WebPane: NSViewRepresentable {
 
           // 把这一列整块复制、钉在窗口上。宽度用缓存的展开宽度——列宽这会儿可能已经
           // 收到 56 了，复制品必须按展开的样子出现，否则里面的内容会重排。
+          //
+          // 复制品不再挂进真正的 frame。皮肤会按 frame 上的状态属性改写侧栏内部样式
+          // （claude 皮肤的 `[data-dsh-claude-part~=layout-frame]:not([data-sidebar-collapsed])
+          // > ... button[new-session]` 就是一条），折叠属性一出现，快照里的「新会话」
+          // 按钮立刻从菜单行变回带边框的大按钮——看起来就是闪了一下。所以给复制品配一个
+          // 「点击前那一帧」的 frame 影子当祖先，挂在 body 下：祖先链上的状态从此冻结，
+          // 快照自始至终长得跟点击前一样。几何由 placeGhost 内联写死。
+          function ghostShell(frame) {
+            var shell = document.createElement('div');
+            var attrs = frame.attributes;
+            for (var i = 0; i < attrs.length; i++) {
+              var name = attrs[i].name;
+              if (name === 'class' || name === 'style'
+                  || name === 'data-animating' || name === 'data-sidebar-collapsed'
+                  || name === 'data-whaless-ghost-frame') { continue; }
+              shell.setAttribute(name, attrs[i].value);
+            }
+            shell.setAttribute('data-whaless-ghost-frame', '');
+            return shell;
+          }
+
+          function placeGhost(shell, rect) {
+            var s = shell.style;
+            function put(k, v) { s.setProperty(k, v, 'important'); }
+            put('position', 'fixed');
+            put('left', rect.left + 'px');
+            put('top', rect.top + 'px');
+            put('width', expandedWidth + 'px');
+            put('height', rect.height + 'px');
+            put('margin', '0');
+            put('padding', '0');
+            put('border', '0');
+            put('display', 'block');
+            put('overflow', 'hidden');
+            put('background', 'none');
+            put('pointer-events', 'none');
+            put('z-index', '2147483000');
+          }
+
+          // 克隆会把 SVG 内部的 id 一起复制一份：快照里 `url(#dsh-wordmark-badge-clip)`
+          // 这类引用仍然指向文档里第一次出现的那份 —— 真身里那份。真身被冻成
+          // visibility:hidden 之后，那个 clipPath 画不出东西，快照里的「HARNESS」
+          // 徽标就只剩一块蓝底。给复制品里的 id 换前缀、引用跟着改，让快照只认自己的 defs。
+          function rewriteGhostIds(ghost) {
+            var prefix = 'whaless-ghost' + (++ghostSeq) + '-';
+            var map = {};
+            var withId = ghost.querySelectorAll('[id]');
+            var i, el, old;
+            for (i = 0; i < withId.length; i++) {
+              old = withId[i].getAttribute('id');
+              if (!old) { continue; }
+              map[old] = prefix + old;
+              withId[i].setAttribute('id', map[old]);
+            }
+            var REFS = ['clip-path', 'mask', 'filter', 'fill', 'stroke',
+                        'marker-start', 'marker-mid', 'marker-end', 'href', 'xlink:href'];
+            var nodes = ghost.querySelectorAll('*');
+            for (i = 0; i < nodes.length; i++) {
+              el = nodes[i];
+              for (var k = 0; k < REFS.length; k++) {
+                var v = el.getAttribute(REFS[k]);
+                if (!v) { continue; }
+                var at = v.indexOf('url(#');
+                if (at >= 0) {
+                  var end = v.indexOf(')', at);
+                  var id = v.slice(at + 5, end).trim();
+                  if (map[id]) {
+                    el.setAttribute(REFS[k],
+                      v.slice(0, at + 5) + map[id] + v.slice(end));
+                  }
+                } else if (v.charAt(0) === '#' && map[v.slice(1)]) {
+                  el.setAttribute(REFS[k], '#' + map[v.slice(1)]);
+                }
+              }
+            }
+          }
+          var ghostSeq = 0;
+
           function makeGhost() {
             var col = colToClone();
             var frame = frameEl();
@@ -495,6 +583,7 @@ struct WebPane: NSViewRepresentable {
             var rect = col.getBoundingClientRect();
             var ghost = col.cloneNode(true);
             ghost.setAttribute('data-whaless-ghost', '');
+            rewriteGhostIds(ghost);
             // 面板本体从 y=50 起才有底色（上面是给交通灯让位的 padding），
             // 复制品要整块（含那 50px）都有底色，否则滑入时顶部是黑的。
             // 取色顺序：面板 → 这块区域的实际底色（静止时采的）→ 逐步往上找。
@@ -502,14 +591,17 @@ struct WebPane: NSViewRepresentable {
             var pan2 = mid2 && mid2.firstElementChild;
             var bg = (pan2 ? solidBg(pan2) : '') || sidebarBg || topBgOf(col);
             var paint = bg ? 'background:' + bg + ' !important;' : '';
-            ghost.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + rect.top
-              + 'px;width:' + expandedWidth + 'px;height:' + rect.height + 'px;margin:0;'
-              + 'z-index:2147483000;pointer-events:none;overflow:hidden;box-sizing:border-box;'
+            // 影子 frame 负责"长在展开态里"，复制品自己只负责尺寸和位移。
+            ghost.style.cssText = 'position:relative;left:0;top:0;width:100%;height:100%;'
+              + 'margin:0;overflow:hidden;box-sizing:border-box;'
               + 'visibility:visible !important;' + paint;
-            frame.appendChild(ghost);
+            var shell = ghostShell(frame);
+            shell.appendChild(ghost);
+            placeGhost(shell, rect);
+            document.body.appendChild(shell);
             copyScroll(col, ghost);
             savedTheme = themeKey();
-            return ghost;
+            return shell;
           }
 
           // 复制品逐帧贴合主栏左缘。CSS 过渡和 grid 列宽过渡虽然参数相同，
@@ -566,8 +658,25 @@ struct WebPane: NSViewRepresentable {
             if (a.timer) { clearTimeout(a.timer); }
             if (a.raf) { cancelAnimationFrame(a.raf); }
             if (a.frame && a.onEnd) { a.frame.removeEventListener('transitionend', a.onEnd); }
+            // 面板自己的 transform 过渡可能比列宽晚一两帧才落位。先等它走完再"换人"：
+            // 否则最后一帧真身还停在离终点 1px 的地方，复制品一撤，边缘和原生按钮
+            // 就一起往回跳一像素。最多等 4 帧，绝不把画面一直冻着。
+            var target = a.collapsing ? -expandedWidth : 0;
+            var tries = 0;
+            (function swapWhenSettled() {
+              if (a.ghost && tries++ < 4 && Math.abs(panelTx() - target) > 0.3) {
+                requestAnimationFrame(swapWhenSettled);
+                return;
+              }
+              swap(a);
+            })();
+          }
+
+          // 把画面从复制品换回真身，并收掉这一轮的冻结状态。
+          function swap(a) {
             var html = document.documentElement;
-            if (a.ghost && a.ghost.parentNode) {
+            var shell = a.shell;
+            if (a.ghost) {
               // 先把复制品挪到真身的位置（差多少补多少），再让它退场：
               // 正反两个方向最后都严丝合缝，不会"到点抖一下"。
               a.ghost.style.setProperty(
@@ -575,11 +684,11 @@ struct WebPane: NSViewRepresentable {
             }
             // 真身先露面，复制品后撤 —— 顺序反了会空一帧。
             html.removeAttribute('data-whaless-frozen');
-            if (a.ghost && a.ghost.parentNode) {
-              a.ghost.parentNode.removeChild(a.ghost);
+            if (shell && shell.parentNode) {
+              shell.parentNode.removeChild(shell);
               // 收起的快照留着：下一次展开要靠它，否则会滑到一半换内容。
               a.ghost.style.removeProperty('transform');
-              savedGhost = a.ghost;
+              savedGhost = shell;
             }
             html.removeAttribute('data-whaless-anim');
             apply();
@@ -595,12 +704,13 @@ struct WebPane: NSViewRepresentable {
               var html = document.documentElement;
               var frame = frameEl();
               var collapsing = !document.querySelector('[data-sidebar-collapsed]');
-              anim = { ghost: null, frame: frame, timer: 0, onEnd: null,
+              anim = { ghost: null, shell: null, frame: frame, timer: 0, onEnd: null,
                        t0: performance.now(), lastLeft: -1, still: 0, raf: 0,
                        collapsing: collapsing };
               if (collapsing) {
                 // 收起：内容马上要换成图标版，先冻一份。
-                anim.ghost = makeGhost();
+                anim.shell = makeGhost();
+                anim.ghost = anim.shell && anim.shell.firstElementChild;
                 if (anim.ghost) { html.setAttribute('data-whaless-frozen', ''); }
               } else {
                 // 展开：清掉折叠期留下的可见性压制，否则整段滑入是隐形的、收尾才"啪"出现。
@@ -612,13 +722,14 @@ struct WebPane: NSViewRepresentable {
                   // 主题变了：旧快照作废，让真身自己滑进来（内容会换，但颜色不会错）。
                   savedGhost = null;
                 }
-                if (savedGhost && frame) {
+                if (savedGhost) {
                   var g = savedGhost;
                   savedGhost = null;
-                  g.style.setProperty('transform',
+                  anim.shell = g;
+                  anim.ghost = g.firstElementChild;
+                  g.firstElementChild.style.setProperty('transform',
                     'translateX(-' + expandedWidth + 'px)', 'important');
-                  frame.appendChild(g);
-                  anim.ghost = g;
+                  document.body.appendChild(g);
                   html.setAttribute('data-whaless-frozen', '');
                 }
               }
