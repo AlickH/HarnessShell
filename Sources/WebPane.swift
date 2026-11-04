@@ -219,10 +219,12 @@ struct WebPane: NSViewRepresentable {
             var showPanelButtons = panelSettled(panel);
             var splitEl = showPanelButtons
               ? document.querySelector('[data-dockkit-split-button]') : null;
+            // 只要"有没有 / 能不能用"，不要坐标：三个按钮由原生按固定间距排，
+            // 位置不跟网页走（否则开合时会叠在一起、高低也参差）。
             var data = {
-              mode: showPanelButtons ? rectCenter('[data-sidebar-right-mode]') : null,
-              split: splitEl ? rectCenter('[data-dockkit-split-button]') : null,
-              // 分栏能不能用由页面决定（单 tab 时是禁用的），原生按钮要跟着变灰。
+              mode: !!(showPanelButtons
+                && document.querySelector('[data-sidebar-right-mode]')),
+              split: !!splitEl,
               splitEnabled: !!(splitEl && !splitEl.disabled),
               open: !!(panel && panel.hasAttribute('data-sidebar-right-open')),
               fullscreen: !!(panel

@@ -16,13 +16,8 @@ struct WhalessApp: App {
                 .overlay(alignment: .topLeading) {
                     TopButtons(model: model)
                 }
-                .overlay(alignment: .topLeading) {
-                    PageChromeButtons(model: model)
-                }
                 .overlay(alignment: .topTrailing) {
-                    RightToggleButton(model: model)
-                        .padding(.top, 12)
-                        .padding(.trailing, 12)
+                    RightButtonsRow(model: model)
                 }
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
@@ -218,63 +213,58 @@ private struct VibrancyBackdrop: NSViewRepresentable {
     }
 }
 
-/// 右上角那颗固定的右侧栏开关：位置跟左上角那颗对称，不随面板开合移动。
-/// 开着就收起、收着就展开，图标不变（和左边那颗一样）。
-private struct RightToggleButton: View {
+/// 右上角这一排：右侧栏开关（32pt，和左上角那颗对称）+ 面板里的全屏 / 分栏（28pt）。
+/// 位置全部由这里排，不跟网页坐标走 —— 三个按钮同高、间距均匀，开合不叠也不跳。
+private struct RightButtonsRow: View {
     @ObservedObject var model: ShellModel
+
+    private func chromeButton(_ id: String, symbol: String, help: String,
+                              enabled: Bool) -> some View {
+        Button {
+            model.clickPageButton(id)
+        } label: {
+            Image(systemName: symbol)
+                .frame(width: 28, height: 28)
+                .font(.system(size: 13, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .help(help)
+        .opacity(model.pageRightOpen ? (enabled ? 1 : 0.4) : 0)
+        .disabled(!model.pageRightOpen || !enabled)
+    }
 
     var body: some View {
         if model.webContentReady {
-            Button {
-                model.toggleRightSidebar()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .frame(width: 32, height: 32)
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
-            .help(model.pageRightOpen ? "收起右侧栏" : "展开右侧栏")
-        }
-    }
-}
-
-/// 右侧面板里的另外两个入口（全屏 / 分栏）：位置由网页上报，面板开合时渐显渐隐。
-private struct PageChromeButtons: View {
-    @ObservedObject var model: ShellModel
-
-    private func symbol(for id: String) -> String {
-        if id == "split" { return "rectangle.split.2x1" }
-        return model.pageRightFullscreen
-            ? "arrow.down.right.and.arrow.up.left"
-            : "arrow.up.left.and.arrow.down.right"
-    }
-
-    private func help(for id: String) -> String {
-        if id == "split" { return "分栏" }
-        return model.pageRightFullscreen ? "退出全屏" : "全屏"
-    }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(model.pageButtons, id: \.id) { button in
+            HStack(spacing: 8) {
+                if model.pageRightSplit {
+                    chromeButton("split", symbol: "rectangle.split.2x1", help: "分栏",
+                                 enabled: model.pageRightSplitEnabled)
+                }
+                if model.pageRightMode {
+                    chromeButton(
+                        "mode",
+                        symbol: model.pageRightFullscreen
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right",
+                        help: model.pageRightFullscreen ? "退出全屏" : "全屏",
+                        enabled: true)
+                }
                 Button {
-                    model.clickPageButton(button.id)
+                    model.toggleRightSidebar()
                 } label: {
-                    Image(systemName: symbol(for: button.id))
-                        .frame(width: 28, height: 28)
-                        .font(.system(size: 13, weight: .medium))
+                    Image(systemName: "sidebar.right")
+                        .frame(width: 32, height: 32)
+                        .font(.system(size: 14, weight: .medium))
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
-                .help(help(for: button.id))
-                .opacity(model.pageRightOpen ? (button.enabled ? 1 : 0.4) : 0)
-                .disabled(!model.pageRightOpen || !button.enabled)
-                .offset(x: button.x - 14, y: button.y - 14)
+                .help(model.pageRightOpen ? "收起右侧栏" : "展开右侧栏")
             }
+            .padding(.top, 12)
+            .padding(.trailing, 12)
+            .animation(.easeInOut(duration: 0.18), value: model.pageRightOpen)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .animation(.easeInOut(duration: 0.18), value: model.pageRightOpen)
     }
 }
 

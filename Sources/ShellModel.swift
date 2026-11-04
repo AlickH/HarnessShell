@@ -149,50 +149,24 @@ final class ShellModel: ObservableObject {
         self.webView = webView
     }
 
-    /// 页面右上角/右侧栏的三个按钮（展开右侧栏、全屏、收起）在窗口里的中心点。
-    /// 网页里这三个按钮被 visibility 隐藏，由原生画成液态玻璃圆钮，点击再回点它们。
-    struct PageButton: Equatable {
-        var id: String
-        var x: CGFloat
-        var y: CGFloat
-        var enabled = true
-    }
-
-    @Published private(set) var pageButtons: [PageButton] = []
-    @Published private(set) var pageRightFullscreen = false
+    /// 右侧栏那几颗原生按钮的状态：有没有、能不能点、开没开、是不是全屏。
+    /// 位置不从这里走 —— 由原生按固定间距排在右上角，和左上角那颗对齐。
+    @Published private(set) var pageRightMode = false
+    @Published private(set) var pageRightSplit = false
+    @Published private(set) var pageRightSplitEnabled = true
     @Published private(set) var pageRightOpen = false
+    @Published private(set) var pageRightFullscreen = false
 
     func reportRightButtons(_ raw: [String: Any]) {
-        func point(_ key: String) -> PageButton? {
-            guard let pair = raw[key] as? [NSNumber], pair.count == 2 else { return nil }
-            return PageButton(id: key, x: CGFloat(truncating: pair[0]),
-                              y: CGFloat(truncating: pair[1]))
+        func flag(_ key: String) -> Bool {
+            (raw[key] as? NSNumber)?.boolValue ?? false
         }
-        var next: [PageButton] = []
-        if let b = point("mode") { next.append(b) }
-        if var b = point("split") {
-            b.enabled = (raw["splitEnabled"] as? NSNumber)?.boolValue ?? true
-            next.append(b)
-        }
-        // 面板收起时页面不再给位置：保留上一次的坐标，只把显隐交给 open，
-        // 这样另外两个按钮可以渐隐而不是瞬移。
-        if !next.isEmpty, next != pageButtons { pageButtons = next }
-        pageRightOpen = (raw["open"] as? NSNumber)?.boolValue ?? false
-        pageRightFullscreen = (raw["fullscreen"] as? NSNumber)?.boolValue ?? false
-    }
-
-    /// 右上角那颗固定的右侧栏开关：开着就收起，收着就展开。
-    func toggleRightSidebar() {
-        guard let webView else { return }
-        let selector = pageRightOpen
-            ? "[data-sidebar-right-toggle]" : "[data-sidebar-right-expand]"
-        webView.evaluateJavaScript(
-            "(function(){var b=document.querySelector('" + selector
-            + "'); if(b){b.click(); for(var i=1;i<=18;i++){"
-            + "setTimeout(window.__whalessApply, i*60);} return 'ok';} return 'none';})()")
-        { value, error in
-            ShellLog.write("right toggle: " + (value as? String ?? error?.localizedDescription ?? "-"))
-        }
+        pageRightMode = flag("mode")
+        pageRightSplit = flag("split")
+        pageRightSplitEnabled = raw["splitEnabled"] as? NSNumber != nil
+            ? flag("splitEnabled") : true
+        pageRightOpen = flag("open")
+        pageRightFullscreen = flag("fullscreen")
     }
 
     /// 原生玻璃按钮点下去：回点网页里对应那个（已隐藏但可点的）按钮。
@@ -213,6 +187,21 @@ final class ShellModel: ObservableObject {
             + "setTimeout(window.__whalessApply, i*60);} return 'ok';} return 'none';})()") { value, error in
             let result = value as? String ?? error?.localizedDescription ?? "-"
             ShellLog.write("right button " + id + ": " + result)
+        }
+    }
+
+    /// 右上角那颗固定的右侧栏开关：开着就收起，收着就展开。
+    func toggleRightSidebar() {
+        guard let webView else { return }
+        let selector = pageRightOpen
+            ? "[data-sidebar-right-toggle]" : "[data-sidebar-right-expand]"
+        webView.evaluateJavaScript(
+            "(function(){var b=document.querySelector('" + selector
+            + "'); if(b){b.click(); for(var i=1;i<=18;i++){"
+            + "setTimeout(window.__whalessApply, i*60);} return 'ok';} return 'none';})()")
+        { value, error in
+            ShellLog.write("right toggle: "
+                + (value as? String ?? error?.localizedDescription ?? "-"))
         }
     }
 
