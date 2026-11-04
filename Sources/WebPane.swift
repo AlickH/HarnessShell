@@ -492,6 +492,9 @@ struct WebPane: NSViewRepresentable {
               // 会话页右上角两个控件改由原生接管（开在应用里 / 更多操作）。
               'button[aria-label="更多操作"],[data-open-target]'
                 + '{visibility:hidden !important}',
+              // 右侧栏全屏时，tab 条（含圆角包裹和 + 按钮）整体让开交通灯。
+              '[data-sidebar-right-panel="fullscreen"] [class*="tabStrip"]'
+                + '{padding-left:90px !important}',
               // 探测菜单项时把网页弹出层藏住：只读 DOM，不让人看见它闪一下。
               'html.whaless-menu-probe [role="menu"]'
                 + '{visibility:hidden !important}',
