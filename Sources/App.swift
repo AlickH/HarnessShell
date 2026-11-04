@@ -109,7 +109,7 @@ struct RootView: View {
                     // 那 28pt 里的点击全被这层吃掉，按钮就"点不动"了。
                     .overlay(alignment: .topLeading) {
                         DragStrip()
-                            .frame(width: 90, height: 28)
+                            .frame(width: 82, height: 28)
                     }
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",

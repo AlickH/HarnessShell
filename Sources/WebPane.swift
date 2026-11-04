@@ -49,15 +49,71 @@ struct WebPane: NSViewRepresentable {
         let source = """
         (function () {
           var inset = \(Int(inset));
+          var HIDDEN = 'whaless-side-hidden';
+          var TOOLBAR = 'whaless-toolbar';
 
-          function columns() {
-            return document.querySelectorAll('[class*="sidebarCol"],[class*="centerCol"],[class*="rightbarCol"]');
+          function injectStyle() {
+            if (document.getElementById('whaless-style')) { return; }
+            var style = document.createElement('style');
+            style.id = 'whaless-style';
+            style.textContent = [
+              '#' + TOOLBAR + '{position:fixed;left:84px;top:5px;display:none;gap:2px;z-index:2147483647}',
+              '#' + TOOLBAR + ' button{width:24px;height:24px;display:flex;align-items:center;justify-content:center;',
+              'border:0;background:transparent;border-radius:6px;color:currentColor;opacity:.55;cursor:default;padding:0}',
+              '#' + TOOLBAR + ' button:hover{background:rgba(127,127,127,.18);opacity:1}',
+              '#' + TOOLBAR + ' svg{width:15px;height:15px;display:block}',
+              // 侧栏隐藏后主区顶栏会顶到最左边，给它让出交通灯的位置
+              'html.' + HIDDEN + ' [class*="centerCol"] > :first-child{padding-left:84px !important}'
+            ].join('');
+            (document.head || document.documentElement).appendChild(style);
           }
 
-          // 不要用 WeakSet 记"加过没有"：React 重渲染会覆盖 inline style，
-          // 记过账的节点会被跳过，内距就悄悄丢了。按实际计算值判断才稳。
-          // 主栏不要内距：顶栏那排按钮要和交通灯齐平。
-          // 侧栏必须留 28px：它的展开按钮正好在交通灯下面，上移就会被按钮盖住点不到。
+          function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
+
+          function icon(path) {
+            return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" '
+              + 'stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';
+          }
+
+          function makeButton(glyph, label, action) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.title = label;
+            button.setAttribute('aria-label', label);
+            button.innerHTML = glyph;
+            button.addEventListener('click', function (event) {
+              event.preventDefault();
+              event.stopPropagation();
+              action();
+            });
+            return button;
+          }
+
+          function toolbar() {
+            var existing = document.getElementById(TOOLBAR);
+            if (existing) { return existing; }
+            var bar = document.createElement('div');
+            bar.id = TOOLBAR;
+            // 侧栏图标 + 新会话
+            bar.appendChild(makeButton(icon('<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/>'),
+              '显示侧栏', function () { setHidden(false); }));
+            bar.appendChild(makeButton(icon('<path d="M8 3.5v9M3.5 8h9"/>'),
+              '新会话', function () {
+                var target = document.querySelector('[class*="newSession"]');
+                if (target) { target.click(); }
+              }));
+            document.body.appendChild(bar);
+            return bar;
+          }
+
+          function setHidden(hidden) {
+            var side = sidebar();
+            if (!side) { return; }
+            side.style.setProperty('display', hidden ? 'none' : '', hidden ? 'important' : '');
+            document.documentElement.classList.toggle(HIDDEN, hidden);
+            toolbar().style.display = hidden ? 'flex' : 'none';
+          }
+
           function setPad(node, px) {
             if (px === 0) {
               node.style.removeProperty('padding-top');
@@ -70,7 +126,6 @@ struct WebPane: NSViewRepresentable {
           }
 
           var rootStyled = false;
-
           function clearRoot() {
             var root = document.getElementById('root');
             if (!root || !rootStyled) { return; }
@@ -79,23 +134,11 @@ struct WebPane: NSViewRepresentable {
             rootStyled = false;
           }
 
-          // 折叠按钮只在展开态隐藏：万一当前就是折叠态，还得留个入口能展开回来。
-          function applySidebar(inset) {
-            var side = document.querySelector('[class*="sidebarCol"]');
-            if (!side) { return; }
-            var wide = side.getBoundingClientRect().width > 200;
-            setPad(side, wide ? 0 : inset);
-            var toggles = side.querySelectorAll('[class*="toggle"]');
-            for (var i = 0; i < toggles.length; i++) {
-              toggles[i].style.setProperty('display', wide ? 'none' : '', wide ? 'important' : '');
-            }
-          }
-
           function apply() {
+            injectStyle();
             var center = document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]');
-            var side = document.querySelector('[class*="sidebarCol"]');
+            var side = sidebar();
             if (!center.length && !side) {
-              // 启动画面阶段还没有两栏，先退到底座；真界面出现后撤掉，避免叠加。
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
               root.style.setProperty('padding-top', inset + 'px', 'important');
@@ -105,22 +148,32 @@ struct WebPane: NSViewRepresentable {
             }
             clearRoot();
             for (var i = 0; i < center.length; i++) { setPad(center[i], 0); }
-            applySidebar(inset);
+            // 折叠成窄条时（宽 < 200）留内距，避免图标压在交通灯底下
+            if (side) { setPad(side, side.getBoundingClientRect().width > 200 ? 0 : inset); }
+            if (document.documentElement.classList.contains(HIDDEN)) { toolbar().style.display = 'flex'; }
           }
+
+          // 侧栏上的折叠按钮：不让它收成窄条，直接把侧栏藏掉
+          document.addEventListener('click', function (event) {
+            var side = sidebar();
+            if (!side || !event.target.closest) { return; }
+            var toggle = event.target.closest('[class*="toggle"]');
+            if (!toggle || !side.contains(toggle)) { return; }
+            event.preventDefault();
+            event.stopPropagation();
+            setHidden(true);
+          }, true);
 
           var scheduled = false;
           function schedule() {
             if (scheduled) { return; }
             scheduled = true;
-            // 用 setTimeout 而不是 requestAnimationFrame：窗口被隐藏（关窗后保活）时
-            // rAF 会被系统挂起，内距就再也补不上了。
             setTimeout(function () { scheduled = false; apply(); }, 50);
           }
 
           apply();
           document.addEventListener('DOMContentLoaded', apply);
           window.addEventListener('load', apply);
-          // 应用是运行时挂载的，节点会被整体替换，所以盯着变化重新加。
           new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
         })();
         """
