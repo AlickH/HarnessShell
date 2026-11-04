@@ -33,8 +33,30 @@ struct WebPane: NSViewRepresentable {
         context.coordinator.webView = webView
         model.attach(webView)
         ShellLog.write("load \(ShellLog.redact(url))")
-        webView.load(URLRequest(url: url))
+        // 先清 cookie 再加载：每次启动端口都变（--port 0），上一次实例留下的
+        // 会话 cookie 会被先送到新端口上，服务端判它无效 → 页面停在 401。
+        Self.clearCookies(of: webView) {
+            webView.load(URLRequest(url: url))
+        }
         return webView
+    }
+
+    /// 清空 WKWebView 的 cookie 后再加载带令牌的地址。
+    private static func clearCookies(of webView: WKWebView, then load: @escaping () -> Void) {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        store.getAllCookies { cookies in
+            guard !cookies.isEmpty else {
+                DispatchQueue.main.async(execute: load)
+                return
+            }
+            ShellLog.write("清理 \(cookies.count) 个旧 cookie")
+            let group = DispatchGroup()
+            for cookie in cookies {
+                group.enter()
+                store.delete(cookie) { group.leave() }
+            }
+            group.notify(queue: .main, execute: load)
+        }
     }
 
     /// 让页面自己避开窗口左上角的三个按钮，同时让左右两栏的背景一直铺到窗口顶端。
@@ -215,17 +237,20 @@ struct WebPane: NSViewRepresentable {
             provisionalRetries = 0
             ShellLog.write("didFinish \(webView.url.map(ShellLog.redact) ?? "-")")
             // 白屏排查：把页面标题和首屏文字记下来，能立刻区分"没加载"和"加载了但渲染空"。
-            for delay in [0.0, 6.0] {
+            for delay in [0.0, 6.0, 14.0] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     webView.evaluateJavaScript("""
                         (function () {
+                          var root = document.getElementById('root');
                           var side = document.querySelector('[class*="sidebarCol"]');
                           var m = document.querySelector('[class*="centerCol"]');
-                          var t = document.querySelector('[class*="toggle"]');
                           function w(el) { return el ? Math.round(el.getBoundingClientRect().width) : '-'; }
-                          return 'side=' + w(side) + ' center=' + w(m)
-                            + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0')
-                            + ' toggleVis=' + (t ? getComputedStyle(t).visibility : '-');
+                          var text = document.body ? document.body.innerText.split(String.fromCharCode(10)).join(' ').slice(0, 40) : '-';
+                          return 'url=' + location.href.slice(0, 46) + ' title=' + document.title
+                            + ' htmlLen=' + document.documentElement.outerHTML.length
+                            + ' root=' + (root ? root.children.length : -1)
+                            + ' side=' + w(side) + ' center=' + w(m)
+                            + ' txt=' + text;
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")
