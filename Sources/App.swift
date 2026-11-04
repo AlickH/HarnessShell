@@ -507,7 +507,7 @@ struct StatusView: View {
 
     var body: some View {
         let wide = availableWidth >= 900
-        let logoWidth = min(max(availableWidth * 0.34, 280), 520)
+        let logoWidth = min(max(availableWidth * 0.46, 360), 720)
         return content(wide: wide, logoWidth: logoWidth)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
