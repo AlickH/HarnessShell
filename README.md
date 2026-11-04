@@ -99,6 +99,54 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 
 内距用 `setTimeout` 而不是 `requestAnimationFrame` 应用——窗口隐藏时 rAF 会被挂起。
 
+
+## 官方桌面端是怎么做的（拆 app.asar 看到的）
+
+放 here 是为了记住"为什么不能照抄"。
+
+**窗口**（`lib/main.js` 的 `createWindow`）：
+
+```js
+process.platform === "darwin" ? {
+  titleBarStyle: "hiddenInset",
+  trafficLightPosition: { x: 16, y: 18 },   // 交通灯位置是原生参数，不是 CSS
+  vibrancy: "sidebar",                       // 侧栏毛玻璃
+  visualEffectState: "active",
+  backgroundColor: "#00000000"
+} : {
+  titleBarStyle: "hidden",
+  titleBarOverlay: { height: 40, ... }       // Windows 用 overlay 高度 + CSS 变量
+}
+```
+
+**preload 只做两件事**（`lib/preload-app.cjs`）：
+
+```js
+document.documentElement.dataset.platform = process.platform;   // darwin
+// 全屏时 data-fullscreen，CSS 据此去掉顶部留白
+```
+
+前端 CSS 里 `html[data-platform=darwin]` 的规则就是透明背景 + `-webkit-app-region: drag`
+的拖拽区（`[data-window-drag]`），**没有任何给交通灯让位的 padding**。
+
+**所以他们的 "按钮和交通灯齐平 / 侧栏整体隐藏" 不是 CSS 技巧**，而是渲染器跑在桌面宿主模式：
+preload 注入 `globalThis.dshDesktopBoot`，前端据此渲染自己的窗口 chrome（tab strip 那一行）。
+我们试过只给 `dsh web` 的页面打 `data-platform=darwin`——结果是**白屏**：
+
+```
+rootChildren=0  htmlLen=42271  bg=rgba(0,0,0,0)  errs=none
+```
+
+因为缺 `dshDesktopBoot`，前端根本不 mount。这条路对 WKWebView 壳走不通。
+
+**结论**：壳只能在 web 模式的基础上做等价的事——
+交通灯用原生 frame 偏移（`+8/-6`），折叠按钮用 `translateY` 对齐到同一水平线，
+隐藏侧栏用"窄条透明化 + 按钮浮到 left:84"。
+
+试过更彻底的做法（把 grid 列宽改成 `0px 1fr 0px`，实测 `center=1070` 满宽），
+但应用会按 DOM 宽度自适应，随即把两栏改成上下堆叠（`side[0,0,1070,562]`），
+所以放弃了——**56px 占位是稳的，满宽是不稳的**。
+
 ## 已知限制
 
 - **没有通知**。WKWebView 不暴露 `Notification` API（Apple DTS 明确说 Web Push 在

@@ -49,22 +49,23 @@ struct WebPane: NSViewRepresentable {
         let source = """
         (function () {
           var inset = \(Int(inset));
-          var TOOLBAR = 'whaless-toolbar';
-          var RAIL_FLAG = 'whalessRail';
+          var RAIL_LEFT = 84;      // 折叠后按钮的位置：让开交通灯（约占到 77）
+          var lift = null;         // 侧栏头部比主栏头部低多少，量一次就够
 
           function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
-          function center() { return document.querySelector('[class*="centerCol"]'); }
           function columns() { return document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]'); }
+          function toggleIn(side) { return side ? side.querySelector('[class*="toggle"]') : null; }
+          // 主栏右上角那排图标，跟侧栏折叠按钮是同一个组件，拿它当对齐基准。
+          function reference() {
+            return document.querySelector('[aria-label="打开右侧边栏"],[aria-label="收起右侧边栏"]');
+          }
 
           function injectStyle() {
             if (document.getElementById('whaless-style')) { return; }
             var style = document.createElement('style');
             style.id = 'whaless-style';
-            style.textContent =
-              // 只定位容器：里面装的是应用自己按钮的克隆，不能覆盖它的样式
-              '#' + TOOLBAR + '{position:fixed;left:84px;top:5px;display:none;align-items:center;z-index:2147483647}'
-              // 折叠后主栏顶到最左边，给它让开交通灯
-              + 'html.whaless-rail [class*="centerCol"] > :first-child{padding-left:28px !important}';
+            // 折叠后主栏顶到最左边，给它的顶栏让开交通灯
+            style.textContent = 'html.whaless-rail [class*="centerCol"] > :first-child{padding-left:28px !important}';
             (document.head || document.documentElement).appendChild(style);
           }
 
@@ -88,66 +89,18 @@ struct WebPane: NSViewRepresentable {
             rootStyled = false;
           }
 
-          function toolbar() {
-            var bar = document.getElementById(TOOLBAR);
-            if (bar) { return bar; }
-            bar = document.createElement('div');
-            bar.id = TOOLBAR;
-            document.body.appendChild(bar);
-            return bar;
-          }
-
-          /// 折叠后显示应用自己那个折叠按钮（克隆），图标和悬停都是原生的。
-          function showToggleInToolbar() {
-            var bar = toolbar();
-            var side = sidebar();
-            var source = side && side.querySelector('[class*="toggle"]');
-            bar.textContent = '';
-            if (source) {
-              var clone = source.cloneNode(true);
-              clone.style.removeProperty('transform');
-              clone.style.setProperty('position', 'static', 'important');
-              clone.style.setProperty('margin', '0', 'important');
-              clone.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                expandSidebar();
-              });
-              bar.appendChild(clone);
-            }
-            bar.style.display = 'flex';
-          }
-
-          function expandSidebar() {
-            var side = sidebar();
-            if (!side) { return; }
-            var toggle = side.querySelector('[class*="toggle"]');
-            if (toggle) { toggle.click(); }
-          }
-
-          /// 只做视觉隐藏：宽度不动，否则主栏会少算这一条（实测 win-56）。
-          function hideRail(side) {
-            [['opacity', '0'], ['background', 'transparent'], ['border-color', 'transparent'],
-             ['box-shadow', 'none'], ['pointer-events', 'none']].forEach(function (pair) {
-              side.style.setProperty(pair[0], pair[1], 'important');
-            });
-            document.documentElement.classList.add('whaless-rail');
-            showToggleInToolbar();
-          }
-
-          function showRail(side) {
-            ['opacity', 'background', 'border-color', 'box-shadow', 'pointer-events']
-              .forEach(function (name) { side.style.removeProperty(name); });
-            document.documentElement.classList.remove('whaless-rail');
-            var bar = document.getElementById(TOOLBAR);
-            if (bar) { bar.style.display = 'none'; }
+          // 折叠态给按钮加的临时定位，回展开态时全部撤掉
+          var TEMP = ['position', 'left', 'top', 'z-index', 'visibility', 'pointer-events', 'transform'];
+          function resetToggle(toggle) {
+            for (var i = 0; i < TEMP.length; i++) { toggle.style.removeProperty(TEMP[i]); }
           }
 
           function apply() {
             injectStyle();
-            var centerColumns = columns();
             var side = sidebar();
-            if (!centerColumns.length && !side) {
+            var cols = columns();
+            if (!side && !cols.length) {
+              // 启动画面阶段还没有分栏，先退到底座；真界面出现后撤掉，避免叠加。
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
               root.style.setProperty('padding-top', inset + 'px', 'important');
@@ -156,25 +109,65 @@ struct WebPane: NSViewRepresentable {
               return;
             }
             clearRoot();
-            for (var i = 0; i < centerColumns.length; i++) { setPad(centerColumns[i], 0); }
+            for (var i = 0; i < cols.length; i++) { setPad(cols[i], 0); }
             if (!side) { return; }
 
-            // 整列保持原位（28px 内距），只把折叠按钮抬到与交通灯齐平
-            setPad(side, inset);
-            var toggle = side.querySelector('[class*="toggle"]');
-            if (toggle && !side.dataset[RAIL_FLAG]) {
-              toggle.style.setProperty('transform', 'translateY(-' + inset + 'px)', 'important');
+            var toggle = toggleIn(side);
+            var width = side.getBoundingClientRect().width;
+
+            if (width > 0 && width < 200) {
+              // 折叠态：应用把它收成 56px 窄条，主栏宽度是按这 56px 算的，
+              // 所以占位不能动，只让这条窄栏"看不见"；折叠按钮本身拎出来浮在交通灯右边。
+              side.style.setProperty('visibility', 'hidden', 'important');
+              side.style.setProperty('background', 'transparent', 'important');
+              // 应用把主栏宽度写成了"窗口 - 侧栏宽"，光把侧栏改 0 会让中间栏留在 790
+              // 并在右边空一条。所以同时把主栏改成可伸缩，让它自己吃掉让出来的空间。
+              side.style.setProperty('width', '0px', 'important');
+              side.style.setProperty('min-width', '0px', 'important');
+              side.style.setProperty('max-width', '0px', 'important');
+              side.style.setProperty('flex', '0 0 0px', 'important');
+              var mids = columns();
+              for (var k = 0; k < mids.length; k++) {
+                mids[k].style.setProperty('width', 'auto', 'important');
+                mids[k].style.setProperty('flex', '1 1 0', 'important');
+              }
+              document.documentElement.classList.add('whaless-rail');
+              if (toggle) {
+                resetToggle(toggle);
+                toggle.style.setProperty('visibility', 'visible', 'important');
+                toggle.style.setProperty('pointer-events', 'auto', 'important');
+                toggle.style.setProperty('position', 'fixed', 'important');
+                toggle.style.setProperty('left', RAIL_LEFT + 'px', 'important');
+                toggle.style.setProperty('top', '11px', 'important');
+                toggle.style.setProperty('z-index', '2147483647', 'important');
+              }
+              return;
             }
 
-            var width = side.getBoundingClientRect().width;
-            if (side.dataset[RAIL_FLAG] === '1') {
-              hideRail(side);
-            } else if (width > 0 && width < 200) {
-              side.dataset[RAIL_FLAG] = '1';
-              hideRail(side);
-            } else if (width >= 200) {
-              if (side.dataset[RAIL_FLAG] !== undefined) { delete side.dataset[RAIL_FLAG]; }
-              showRail(side);
+            // 展开态：侧栏整列保持 28px 内距（logo 在交通灯下面），
+            // 只把折叠按钮抬到和主栏那排图标同一水平线——它们是同一个组件同一个尺寸，
+            // 差的那点高度纯粹来自侧栏的 28px 内距，所以按实测差值平移即可。
+            document.documentElement.classList.remove('whaless-rail');
+            ['visibility', 'background', 'width', 'min-width', 'max-width', 'flex'].forEach(function (name) {
+              side.style.removeProperty(name);
+            });
+            var mids = columns();
+            for (var k = 0; k < mids.length; k++) {
+              mids[k].style.removeProperty('width');
+              mids[k].style.removeProperty('flex');
+            }
+            setPad(side, inset);
+            if (!toggle) { return; }
+            resetToggle(toggle);
+            if (lift === null) {
+              var own = toggle.getBoundingClientRect().top;
+              var ref = reference();
+              var refTop = ref ? ref.getBoundingClientRect().top : 11;
+              lift = Math.max(0, Math.round(own - refTop));
+              window.console.log('[whaless] toggle lift = ' + lift);
+            }
+            if (lift > 0) {
+              toggle.style.setProperty('transform', 'translateY(-' + lift + 'px)', 'important');
             }
           }
 
@@ -189,7 +182,7 @@ struct WebPane: NSViewRepresentable {
           document.addEventListener('DOMContentLoaded', apply);
           window.addEventListener('load', apply);
           new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
-          // 折叠只改样式不产生结构变化，观察器收不到，补一层低频轮询。
+          // 折叠/展开只改样式不产生结构变化，观察器收不到，补一层低频轮询。
           setInterval(apply, 600);
         })();
         """
@@ -277,14 +270,13 @@ struct WebPane: NSViewRepresentable {
                     webView.evaluateJavaScript("""
                         (function () {
                           var side = document.querySelector('[class*="sidebarCol"]');
-                          var center = document.querySelector('[class*="centerCol"]');
-                          var toggle = side && side.querySelector('[class*="toggle"]');
-                          function top(el) { return el ? Math.round(el.getBoundingClientRect().top) : '-'; }
-                          return 'pad(side)=' + (side ? getComputedStyle(side).paddingTop : '-')
-                            + ' toggleY=' + top(toggle)
-                            + ' centerTop=' + (center && center.firstElementChild
-                                ? Math.round(center.firstElementChild.getBoundingClientRect().top) : '-')
-                            + ' rail=' + (side && side.dataset.whalessRail ? '1' : '0');
+                          var m = document.querySelector('[class*="centerCol"]');
+                          function rect(el) {
+                            if (!el) { return '-'; }
+                            var r = el.getBoundingClientRect();
+                            return [r.x, r.y, r.width].map(Math.round).join(',');
+                          }
+                          return 'side[' + rect(side) + '] center[' + rect(m) + '] win=' + innerWidth;
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")
