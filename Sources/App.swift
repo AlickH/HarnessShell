@@ -474,7 +474,10 @@ struct DeepySprite: View {
     var width: CGFloat = 90
 
     @State private var frameIndex = 0
-    private let timer = Timer.publish(every: 0.16, on: .main, in: .common).autoconnect()
+    /// 精灵帧本身只有细微的呼吸/气泡变化，皮肤另外叠了 CSS 的悬浮/呼吸动画，
+    /// 这里用同样的思路补一层轻微的上下浮动 + 缩放，让它在启动页里"活"起来。
+    @State private var bob = false
+    private let timer = Timer.publish(every: 0.14, on: .main, in: .common).autoconnect()
 
     private let frameXs: [CGFloat] = [6, 196, 386, 575, 765, 955, 1146, 1336]
     private let frameY: CGFloat = 7
@@ -492,7 +495,12 @@ struct DeepySprite: View {
                         y: -frameY * scale)
                 .frame(width: width, height: frameH * scale, alignment: .topLeading)
                 .clipped()
+                .offset(y: bob ? -2 : 2)
+                .scaleEffect(bob ? 1.02 : 0.99, anchor: .bottom)
+                .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true),
+                           value: bob)
                 .onReceive(timer) { _ in frameIndex = (frameIndex + 1) % frameXs.count }
+                .onAppear { bob = true }
         }
     }
 
