@@ -100,6 +100,35 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 内距用 `setTimeout` 而不是 `requestAnimationFrame` 应用——窗口隐藏时 rAF 会被挂起。
 
 
+
+## 侧栏开关是原生的
+
+标题栏左侧那个图标（交通灯右边）是 SwiftUI 里挂的一个 `NSButton`，**web 端自己的折叠
+按钮被 CSS 隐藏**（`visibility:hidden`，不是 `display:none`，否则 JS `.click()` 之外
+还得自己复制状态机）。
+
+```
+点原生按钮 → evaluateJavaScript：side.querySelector('[class*="toggle"]').click()
+           → 应用自己走它的状态机 → 主栏宽度由它重算 → 壳只负责"窄栏别露出来"
+```
+
+实测：
+
+```
+展开 side=280 center=790 rail=0   toggleVis=hidden
+点击 side=56  center=1014 rail=1   ← 窄栏透明、主栏顶到左边
+再点 side=280 center=790 rail=0
+```
+
+为什么不在壳里直接改宽度：主栏宽度是应用按"侧栏占多少"算的（父容器 grid 列），
+壳改宽度它不知道，实测会切成上下堆叠（`side[0,0,1070,562]`）。
+
+兜底入口：菜单「显示 → 切换侧边栏」（⌃⌘S）。按钮万一被挡住还能用键盘切。
+
+> 用 `NSButton` 而不是 SwiftUI `Button`：这台机器上 SwiftUI 的宏插件是坏的
+> （`@State` 展开报 `swift-plugin-server produced malformed response`），
+> 顺手也拿到了原生 hover 高亮。
+
 ## 官方桌面端是怎么做的（拆 app.asar 看到的）
 
 放 here 是为了记住"为什么不能照抄"。
@@ -188,6 +217,7 @@ rootChildren=0  htmlLen=42271  bg=rgba(0,0,0,0)  errs=none
 | `Sources/WebPane.swift` | WKWebView 与那堆 delegate |
 | `Sources/WindowKeeper.swift` | 关窗保活（转发代理）+ 拿到 NSWindow |
 | `Sources/DragStrip.swift` | 隐藏标题栏后那 28pt 的拖动区 |
+| `Sources/SidebarToggle.swift` | 原生侧栏开关（NSButton + hover） |
 | `Sources/AppPaths.swift` | 日志/支持目录 |
 | `Sources/ShellLog.swift` | 壳自己的日志（令牌打码） |
 | `Resources/Whaless.icon` | Icon Composer 文档，actool 生成亮/暗全套 |

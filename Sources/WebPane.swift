@@ -45,27 +45,27 @@ struct WebPane: NSViewRepresentable {
     ///
     /// 类名带 CSS Modules 的哈希前缀（`pI_x6G_sidebarCol`），所以按后缀匹配；
     /// 万一将来改了名，退回到给 `#root` 加内距（会露出 body 底色，但至少不会压住按钮）。
+    /// 页面这一侧的职责只剩两件事：把 web 自己的折叠按钮藏起来，折叠后别让窄条露出来。
+    /// 展开/收起由 SwiftUI 那个原生按钮触发（它 JS `.click()` 这个隐藏按钮）。
     private static func titlebarScript(inset: CGFloat) -> WKUserScript {
         let source = """
         (function () {
           var inset = \(Int(inset));
-          var RAIL_LEFT = 84;      // 折叠后按钮的位置：让开交通灯（约占到 77）
-          var lift = null;         // 侧栏头部比主栏头部低多少，量一次就够
+          // 折叠后主栏顶到最左边，顶栏要给交通灯 + 原生按钮让位
+          var RAIL_PAD = 64;
 
           function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
           function columns() { return document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]'); }
-          function toggleIn(side) { return side ? side.querySelector('[class*="toggle"]') : null; }
-          // 主栏右上角那排图标，跟侧栏折叠按钮是同一个组件，拿它当对齐基准。
-          function reference() {
-            return document.querySelector('[aria-label="打开右侧边栏"],[aria-label="收起右侧边栏"]');
-          }
 
           function injectStyle() {
             if (document.getElementById('whaless-style')) { return; }
             var style = document.createElement('style');
             style.id = 'whaless-style';
-            // 折叠后主栏顶到最左边，给它的顶栏让开交通灯
-            style.textContent = 'html.whaless-rail [class*="centerCol"] > :first-child{padding-left:28px !important}';
+            style.textContent = [
+              // 用 visibility 而不是 display：元素还在 DOM 里，JS .click() 照样触发它的事件
+              '[class*="sidebarCol"] [class*="toggle"]{visibility:hidden !important}',
+              'html.whaless-rail [class*="centerCol"] > :first-child{padding-left:' + RAIL_PAD + 'px !important}'
+            ].join('');
             (document.head || document.documentElement).appendChild(style);
           }
 
@@ -89,18 +89,11 @@ struct WebPane: NSViewRepresentable {
             rootStyled = false;
           }
 
-          // 折叠态给按钮加的临时定位，回展开态时全部撤掉
-          var TEMP = ['position', 'left', 'top', 'z-index', 'visibility', 'pointer-events', 'transform'];
-          function resetToggle(toggle) {
-            for (var i = 0; i < TEMP.length; i++) { toggle.style.removeProperty(TEMP[i]); }
-          }
-
           function apply() {
             injectStyle();
             var side = sidebar();
             var cols = columns();
             if (!side && !cols.length) {
-              // 启动画面阶段还没有分栏，先退到底座；真界面出现后撤掉，避免叠加。
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
               root.style.setProperty('padding-top', inset + 'px', 'important');
@@ -112,63 +105,21 @@ struct WebPane: NSViewRepresentable {
             for (var i = 0; i < cols.length; i++) { setPad(cols[i], 0); }
             if (!side) { return; }
 
-            var toggle = toggleIn(side);
             var width = side.getBoundingClientRect().width;
-
             if (width > 0 && width < 200) {
-              // 折叠态：应用把它收成 56px 窄条，主栏宽度是按这 56px 算的，
-              // 所以占位不能动，只让这条窄栏"看不见"；折叠按钮本身拎出来浮在交通灯右边。
+              // 折叠态：应用把它收成 56px 窄条，主栏宽度按这 56px 算的，占位不能动，
+              // 只让这条窄栏看不见。按钮由原生那边提供，所以这里不需要再挪 DOM。
               side.style.setProperty('visibility', 'hidden', 'important');
               side.style.setProperty('background', 'transparent', 'important');
-              // 应用把主栏宽度写成了"窗口 - 侧栏宽"，光把侧栏改 0 会让中间栏留在 790
-              // 并在右边空一条。所以同时把主栏改成可伸缩，让它自己吃掉让出来的空间。
-              side.style.setProperty('width', '0px', 'important');
-              side.style.setProperty('min-width', '0px', 'important');
-              side.style.setProperty('max-width', '0px', 'important');
-              side.style.setProperty('flex', '0 0 0px', 'important');
-              var mids = columns();
-              for (var k = 0; k < mids.length; k++) {
-                mids[k].style.setProperty('width', 'auto', 'important');
-                mids[k].style.setProperty('flex', '1 1 0', 'important');
-              }
               document.documentElement.classList.add('whaless-rail');
-              if (toggle) {
-                resetToggle(toggle);
-                toggle.style.setProperty('visibility', 'visible', 'important');
-                toggle.style.setProperty('pointer-events', 'auto', 'important');
-                toggle.style.setProperty('position', 'fixed', 'important');
-                toggle.style.setProperty('left', RAIL_LEFT + 'px', 'important');
-                toggle.style.setProperty('top', '11px', 'important');
-                toggle.style.setProperty('z-index', '2147483647', 'important');
-              }
               return;
             }
 
-            // 展开态：侧栏整列保持 28px 内距（logo 在交通灯下面），
-            // 只把折叠按钮抬到和主栏那排图标同一水平线——它们是同一个组件同一个尺寸，
-            // 差的那点高度纯粹来自侧栏的 28px 内距，所以按实测差值平移即可。
+            // 展开态：侧栏整列保留 28px 内距，logo 不钻到交通灯下面
+            side.style.removeProperty('visibility');
+            side.style.removeProperty('background');
             document.documentElement.classList.remove('whaless-rail');
-            ['visibility', 'background', 'width', 'min-width', 'max-width', 'flex'].forEach(function (name) {
-              side.style.removeProperty(name);
-            });
-            var mids = columns();
-            for (var k = 0; k < mids.length; k++) {
-              mids[k].style.removeProperty('width');
-              mids[k].style.removeProperty('flex');
-            }
             setPad(side, inset);
-            if (!toggle) { return; }
-            resetToggle(toggle);
-            if (lift === null) {
-              var own = toggle.getBoundingClientRect().top;
-              var ref = reference();
-              var refTop = ref ? ref.getBoundingClientRect().top : 11;
-              lift = Math.max(0, Math.round(own - refTop));
-              window.console.log('[whaless] toggle lift = ' + lift);
-            }
-            if (lift > 0) {
-              toggle.style.setProperty('transform', 'translateY(-' + lift + 'px)', 'important');
-            }
           }
 
           var scheduled = false;
@@ -182,7 +133,6 @@ struct WebPane: NSViewRepresentable {
           document.addEventListener('DOMContentLoaded', apply);
           window.addEventListener('load', apply);
           new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
-          // 折叠/展开只改样式不产生结构变化，观察器收不到，补一层低频轮询。
           setInterval(apply, 600);
         })();
         """
@@ -271,12 +221,11 @@ struct WebPane: NSViewRepresentable {
                         (function () {
                           var side = document.querySelector('[class*="sidebarCol"]');
                           var m = document.querySelector('[class*="centerCol"]');
-                          function rect(el) {
-                            if (!el) { return '-'; }
-                            var r = el.getBoundingClientRect();
-                            return [r.x, r.y, r.width].map(Math.round).join(',');
-                          }
-                          return 'side[' + rect(side) + '] center[' + rect(m) + '] win=' + innerWidth;
+                          var t = document.querySelector('[class*="toggle"]');
+                          function w(el) { return el ? Math.round(el.getBoundingClientRect().width) : '-'; }
+                          return 'side=' + w(side) + ' center=' + w(m)
+                            + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0')
+                            + ' toggleVis=' + (t ? getComputedStyle(t).visibility : '-');
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")

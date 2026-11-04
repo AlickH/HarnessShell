@@ -68,6 +68,27 @@ final class ShellModel: ObservableObject {
         webView?.reload()
     }
 
+    // MARK: - 侧栏
+
+    /// 原生按钮接管折叠：代 web 端那个（已被隐藏的）按钮点一下。
+    ///
+    /// 不能直接改宽度——主栏宽度是应用按"侧栏占多少"算出来的，壳只负责触发它的状态机。
+    /// `visibility:hidden` 的元素依然能 `.click()`，所以按钮藏起来不影响这条路径。
+    func toggleSidebar() {
+        guard let webView else { return }
+        webView.evaluateJavaScript("""
+            (function () {
+              var side = document.querySelector('[class*="sidebarCol"]');
+              var toggle = side && side.querySelector('[class*="toggle"]');
+              if (toggle) { toggle.click(); return 'ok'; }
+              return 'no-toggle';
+            })()
+            """) { value, error in
+            let result = value as? String ?? error?.localizedDescription ?? "-"
+            ShellLog.write("sidebar toggle: \(result)")
+        }
+    }
+
     func zoom(by delta: CGFloat) {
         guard let webView else { return }
         webView.pageZoom = min(max(webView.pageZoom + delta, 0.5), 2.0)

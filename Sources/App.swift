@@ -43,6 +43,11 @@ struct WhalessApp: App {
                 Button("缩小") { model.zoom(by: -0.1) }
                     .keyboardShortcut("-")
             }
+            // 兜底入口：万一面上的按钮被什么挡住，这里也能切。
+            CommandGroup(after: .sidebar) {
+                Button("切换侧边栏") { model.toggleSidebar() }
+                    .keyboardShortcut("s", modifiers: [.control, .command])
+            }
             CommandMenu("内核") {
                 Button("检查内核更新…") { model.checkKernelUpdate() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
@@ -105,11 +110,16 @@ struct RootView: View {
             case .ready(let url):
                 WebPane(url: url, model: model)
                     .ignoresSafeArea()
-                    // 拖动窗口只靠左上角这一小块：横跨整条会把页面顶栏的按钮一起盖住，
-                    // 那 28pt 里的点击全被这层吃掉，按钮就"点不动"了。
+                    // 左上角这一条：交通灯（原生，浮在页面之上）→ 拖拽区 → 原生侧栏开关。
+                    // 开关按交通灯右侧对齐（灯占到 x≈81），web 端自己的折叠按钮已被隐藏。
                     .overlay(alignment: .topLeading) {
-                        DragStrip()
-                            .frame(width: 82, height: 28)
+                        HStack(spacing: 0) {
+                            DragStrip()
+                                .frame(width: 86, height: 28)
+                            SidebarToggle { model.toggleSidebar() }
+                                .frame(width: 28, height: 28)
+                        }
+                        .padding(.top, 4)
                     }
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",
