@@ -1,4 +1,4 @@
-name: HarnessShell
+name: Whaless
 options:
   bundleIdPrefix: com.alick
   deploymentTarget:
@@ -12,15 +12,18 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
 targets:
-  HarnessShell:
+  Whaless:
     type: application
     platform: macOS
     sources:
       - path: Sources
+      # Icon Composer 文档：actool 一次生成亮/暗/着色全套，不用手工导 PNG。
+      - path: Resources/Whaless.icon
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.alick.harnessshell
-        PRODUCT_NAME: Harness Shell
+        PRODUCT_BUNDLE_IDENTIFIER: com.alick.whaless.mac
+        PRODUCT_NAME: Whaless
+        ASSETCATALOG_COMPILER_APPICON_NAME: Whaless
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO

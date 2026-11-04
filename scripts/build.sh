@@ -7,12 +7,12 @@ cd "$(dirname "$0")/.."
 xcodegen generate >/dev/null
 
 xcodebuild \
-  -project HarnessShell.xcodeproj \
-  -target HarnessShell \
+  -project Whaless.xcodeproj \
+  -target Whaless \
   -configuration Debug \
   SYMROOT=build \
   build 2>&1 | tail -8
 
-APP="build/Debug/Harness Shell.app"
+APP="build/Debug/Whaless.app"
 echo "→ $APP"
 open "$APP"

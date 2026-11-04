@@ -16,6 +16,50 @@ struct LaunchFailure: Error {
 /// 1. `--port 0` 让系统分配端口，省掉端口冲突；
 /// 2. stdout 必须实时读，不能只重定向到文件（否则拿不到令牌）；
 /// 3. 进程死了要么重启，要么把原因写进日志，绝不静默失败。
+/// 内核是从哪儿来的——决定了"检查更新"能做什么。
+enum KernelInstall {
+    /// `npm i -g` 装的，直接 `npm install -g @…@latest` 就能升。
+    case npmGlobal(String)
+    /// 只跑过 npx，内核躺在缓存里。
+    case npxCache(node: String, cli: String)
+
+    var label: String {
+        switch self {
+        case .npmGlobal: return "npm 全局安装"
+        case .npxCache: return "npx 缓存"
+        }
+    }
+
+    var supportsUpgrade: Bool {
+        if case .npmGlobal = self { return true }
+        return false
+    }
+
+    var hint: String {
+        switch self {
+        case .npmGlobal(let path):
+            return path
+        case .npxCache:
+            return "当前用的是 npx 缓存，重启会拿最新版；也可以改用 npm 全局安装。"
+        }
+    }
+}
+
+/// 一个可启动的内核入口。`prefix` 是给 node 用的（`node <bin.js> …`）。
+struct Launch {
+    let executable: URL
+    let prefix: [String]
+    let install: KernelInstall
+
+    func webArguments(port: String) -> [String] {
+        prefix + ["web", "--no-open", "--port", port]
+    }
+
+    var versionArguments: [String] {
+        prefix + ["-V"]
+    }
+}
+
 final class ServerRunner {
     private var process: Process?
     private var pipe: Pipe?
@@ -28,11 +72,6 @@ final class ServerRunner {
     private var onFailure: ((LaunchFailure) -> Void)?
     private var settled = false
     private let lock = NSLock()
-
-    private struct Launch {
-        let executable: URL
-        let arguments: [String]
-    }
 
     // MARK: - 启动
 
@@ -96,7 +135,7 @@ final class ServerRunner {
     private func spawn(_ launch: Launch) throws {
         let process = Process()
         process.executableURL = launch.executable
-        process.arguments = launch.arguments + ["--no-open", "--port", "0"]
+        process.arguments = launch.webArguments(port: "0")
         process.environment = ServerRunner.environment
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
 
@@ -188,7 +227,7 @@ final class ServerRunner {
 
     // MARK: - 定位
 
-    private static let environment: [String: String] = {
+    static let environment: [String: String] = {
         var env = ProcessInfo.processInfo.environment
         // GUI 应用的 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin，homebrew 的 node 会找不到。
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -196,22 +235,23 @@ final class ServerRunner {
         return env
     }()
 
-    private static func resolve() -> Launch? {
+    static func resolve() -> Launch? {
+        // 只要 npm 装的那份。注意 `/usr/local/bin/dsh` 可能是桌面 App 的软链，
+        // 那种要按真实路径排除掉——它不是 npm 内核，也不会跟着 npm 更新。
         let named = ["/opt/homebrew/bin/dsh", "/usr/local/bin/dsh", "\(NSHomeDirectory())/.local/bin/dsh"]
         for path in named where isExecutable(path) {
-            return Launch(executable: URL(fileURLWithPath: path), arguments: ["web"])
-        }
-
-        // 桌面端自带的 CLI：它本身是 ELECTRON_RUN_AS_NODE 的 shim，可以直接当 node 用。
-        let bundled = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-        if isExecutable(bundled) {
-            return Launch(executable: URL(fileURLWithPath: bundled), arguments: ["web"])
+            let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            if real.contains("DeepSeek Harness.app") {
+                ShellLog.write("跳过 \(path)：指向桌面端内置内核（\(real)）")
+                continue
+            }
+            return Launch(executable: URL(fileURLWithPath: path), prefix: [], install: .npmGlobal(real))
         }
 
         // 只跑过 npx 的机器：缓存里有一份 kernel，但需要自己找 node。
         if let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].first(where: isExecutable),
            let cli = newestNpxCLI() {
-            return Launch(executable: URL(fileURLWithPath: node), arguments: [cli, "web"])
+            return Launch(executable: URL(fileURLWithPath: node), prefix: [cli], install: .npxCache(node: node, cli: cli))
         }
         return nil
     }
@@ -241,10 +281,7 @@ final class ServerRunner {
     /// 强杀/崩溃时子进程会被过继给 launchd 继续跑，下次启动就多一个监听端口。
     /// 记下 pid，下次启动只杀"确实是我们起的那个"（按进程名核对，避免 pid 复用误伤）。
     private static var pidFileURL: URL {
-        let dir = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/HarnessShell", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("child.pid")
+        AppPaths.supportDir.appendingPathComponent("child.pid")
     }
 
     private static func writePidFile(_ pid: Int32) {
@@ -296,9 +333,7 @@ final class ServerRunner {
     // MARK: - 日志
 
     static var logURL: URL {
-        let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Logs/HarnessShell", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("dsh.log")
+        AppPaths.logsDir.appendingPathComponent("dsh.log")
     }
 
     private static func openLog() throws -> FileHandle {

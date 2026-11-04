@@ -2,12 +2,12 @@ import AppKit
 import SwiftUI
 
 @main
-struct HarnessShellApp: App {
+struct WhalessApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = ShellModel.shared
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Whaless") {
             RootView(model: model)
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
@@ -26,6 +26,15 @@ struct HarnessShellApp: App {
                     .keyboardShortcut("=", modifiers: .command)
                 Button("缩小") { model.zoom(by: -0.1) }
                     .keyboardShortcut("-")
+            }
+            CommandMenu("内核") {
+                Button("检查内核更新…") { model.checkKernelUpdate() }
+                    .keyboardShortcut("u", modifiers: [.command, .shift])
+                Button("安装 / 重装 npm 版内核…") { model.installKernel() }
+                Divider()
+                Button("打开日志") {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: model.logPath))
+                }
             }
         }
     }
@@ -60,13 +69,15 @@ struct RootView: View {
                            detail: detail,
                            showsSpinner: true,
                            logPath: nil,
-                           retry: nil)
+                           retry: nil,
+                           install: nil)
             case .failed(let message):
                 StatusView(title: "没能连上 Harness",
                            detail: message,
                            showsSpinner: false,
                            logPath: model.logPath,
-                           retry: { model.retry() })
+                           retry: { model.retry() },
+                           install: { model.installKernel() })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -79,6 +90,7 @@ struct StatusView: View {
     let showsSpinner: Bool
     let logPath: String?
     let retry: (() -> Void)?
+    let install: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 14) {
@@ -96,9 +108,12 @@ struct StatusView: View {
                 .frame(maxWidth: 460)
 
             HStack(spacing: 10) {
+                if let install {
+                    Button("安装 npm 版内核", action: install)
+                        .keyboardShortcut(.defaultAction)
+                }
                 if let retry {
                     Button("重试", action: retry)
-                        .keyboardShortcut(.defaultAction)
                 }
                 if let logPath {
                     Button("打开日志") {

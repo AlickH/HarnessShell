@@ -3,9 +3,7 @@ import Foundation
 /// 壳自己的日志。和 dsh 的输出分开存，排查"白屏"时先看这里。
 enum ShellLog {
     static var url: URL {
-        let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Logs/HarnessShell", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("shell.log")
+        AppPaths.logsDir.appendingPathComponent("shell.log")
     }
 
     private static let formatter: DateFormatter = {
