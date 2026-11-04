@@ -131,10 +131,25 @@ final class ServerRunner {
 
     // MARK: - 进程与输出
 
+    /// 固定端口：端口不变 → origin 不变 → WKWebView 的 HTTP 缓存能命中，
+    /// 第二次启动页面加载从 ~1.9s 降到零点几秒。端口被别的进程占用时，
+    /// 重启路径会自动退回 `--port 0` 让系统分配。
+    private var portArgument: String {
+        if fallbackToRandomPort { return "0" }
+        let defaults = UserDefaults.standard
+        if defaults.integer(forKey: "kernelPort") == 0 {
+            defaults.set(47810, forKey: "kernelPort")
+        }
+        return String(defaults.integer(forKey: "kernelPort"))
+    }
+
+    /// 首次启动失败（端口被占）后改用随机端口。
+    private var fallbackToRandomPort = false
+
     private func spawn(_ launch: Launch) throws {
         let process = Process()
         process.executableURL = launch.executable
-        process.arguments = launch.webArguments(port: "0")
+        process.arguments = launch.webArguments(port: self.portArgument)
         process.environment = ServerRunner.environment
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
 
@@ -160,6 +175,8 @@ final class ServerRunner {
                 return
             }
             self.restarts += 1
+            // 第一次重启大概率是固定端口被占：退回随机端口，别再撞同一个。
+            self.fallbackToRandomPort = true
             DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
                 try? self.spawn(launch)
             }
