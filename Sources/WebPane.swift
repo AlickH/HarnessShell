@@ -17,13 +17,27 @@ struct WebPane: NSViewRepresentable {
         configuration.websiteDataStore = .default()
 
         configuration.userContentController.addUserScript(Self.sidebarScript())
+        // web → 原生：侧栏宽度上报通道（按钮位置要贴着分割线走）。
+        configuration.userContentController.add(context.coordinator, name: "whaless")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.allowsMagnification = true
+        // 关掉这些手势：它们会让页面被缩放/拖出边界，露出背后的白边。
+        // Electron 桌面端默认也不开，行为一致。
+        webView.allowsBackForwardNavigationGestures = false
+        webView.allowsMagnification = false
         webView.underPageBackgroundColor = .windowBackgroundColor
+        // 暗色模式启动时，页面加载前 WKWebView 会先露出它自己的默认白底，
+        // 造成「白闪」。给它的 layer 一个跟随外观的底色，把这一闪压成暗色。
+        webView.wantsLayer = true
+        webView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        Self.syncWebViewAppearance(webView)
+        // 关闭 WKWebView 自身的背景绘制（私有 KVC）：它默认在页面内容提交前
+        // 画一块白底，是白闪的元凶。关掉后由上层 layer 底色兜底。
+        webView.setValue(false, forKey: "drawsBackground")
+        // 禁用弹性滚动：否则双指拖动会把页面拖出边界，露出背后的白边。
+        Self.disableBounce(in: webView)
         if #available(macOS 13.3, *) {
             webView.isInspectable = true   // Safari 的「开发」菜单里能挂上检查器
         }
@@ -37,6 +51,30 @@ struct WebPane: NSViewRepresentable {
             webView.load(URLRequest(url: url))
         }
         return webView
+    }
+
+    /// 递归找到 WKWebView 内部的 NSScrollView，关掉弹性滚动。
+    /// macOS 的 WKWebView 没有公开的 scrollView 属性，只能遍历子视图。
+    private static func disableBounce(in view: NSView) {
+        if let scroll = view as? NSScrollView {
+            scroll.verticalScrollElasticity = .none
+            scroll.horizontalScrollElasticity = .none
+            scroll.hasVerticalScroller = false
+            scroll.hasHorizontalScroller = false
+            return
+        }
+        for sub in view.subviews {
+            disableBounce(in: sub)
+        }
+    }
+
+    /// 让 WKWebView 的底层背景跟随系统外观：暗色模式用暗底、亮色用亮底，
+    /// 避免暗色下启动时页面加载前先闪一下白色空白。
+    private static func syncWebViewAppearance(_ webView: WKWebView) {
+        let dark = webView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let bg = dark ? NSColor(calibratedWhite: 0.10, alpha: 1) : NSColor.white
+        webView.layer?.backgroundColor = bg.cgColor
+        webView.underPageBackgroundColor = bg
     }
 
     /// 清空 WKWebView 的 cookie 后再加载带令牌的地址。
@@ -57,47 +95,332 @@ struct WebPane: NSViewRepresentable {
         }
     }
 
-    /// 让页面自己避开窗口左上角的三个按钮，同时让左右两栏的背景一直铺到窗口顶端。
+    /// 无标题栏：内容铺满到交通灯下面。顶部那两个液态玻璃按钮是 SwiftUI 画的浮层，
+    /// web 页面不知道它们存在，所以壳要把「让位」这件事自己补上——照抄官方桌面端
+    /// 的做法，只是绕开那条打不开的 `data-platform=darwin` 分支。
     ///
-    /// 关键是**把内距加在两栏自己身上**（`sidebarCol` / `centerCol`），而不是它们的
-    /// 共同祖先：背景会覆盖 padding 盒，于是侧栏的灰底、主区的白底都能延伸到红绿灯
-    /// 那一行，只有内容整体下移——看起来就像页面本来就长这样，而不是有一条标题栏。
-    ///
-    /// 类名带 CSS Modules 的哈希前缀（`pI_x6G_sidebarCol`），所以按后缀匹配；
-    /// 万一将来改了名，退回到给 `#root` 加内距（会露出 body 底色，但至少不会压住按钮）。
-    /// 页面这一侧只剩两件事：把 web 自己的折叠按钮藏起来、折叠后别让那条窄栏露出来。
-    /// 展开/收起由标题栏的 SwiftUI 工具栏按钮触发（它 JS `.click()` 这个隐藏按钮）。
-    /// 标题栏是原生的，内容不再压到交通灯下面，所以不需要任何 padding 补偿。
+    /// 展开/收起仍由标题栏的 SwiftUI 按钮触发（JS `.click()` 这个按钮），所以按钮
+    /// 保留在 DOM 里且可见，两处入口指向同一个状态机。
     private static func sidebarScript() -> WKUserScript {
         let source = """
         (function () {
-          function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
+          // 注入脚本任何一处抛错都直接进壳日志：这个脚本是壳和 web 的唯一粘合层，
+          // 静默死掉的后果是"原生按钮消失、web 按钮复活"，肉眼像整层注入被剥掉。
+          window.addEventListener('error', function (e) {
+            try {
+              window.webkit.messageHandlers.whaless.postMessage(
+                { log: 'js error: ' + e.message + ' @' + e.lineno });
+            } catch (err) {}
+          });
+          // 注意：DOM 里可能同时存在多个 `[class*="sidebarCol"]` 节点（展开列和
+          // 折叠 rail 各一份，或过渡期间两份都在），querySelector 取第一个会抓到
+          // 哪个全看渲染顺序——上报值就会在 280/56 之间来回跳，按钮跟着乱跑。
+          // 所以一律按"最宽的那个"算宽度，折叠状态则读 React 自己打的
+          // `[data-sidebar-collapsed]`（它在折叠那一帧就打上，比宽度更可信）。
+          // 复制品（ghost）是整列的 clone，类名里同样带 sidebarCol，但它钉死在窗口上、
+          // 宽度永远是展开宽度 —— 一旦把它算进候选，量出来的宽度在整段动画里恒等于 280，
+          // 原生的液态玻璃按钮就跟着一动不动，等动画结束才"啪"地跳到位。所以一律排除。
+          function sidebars() {
+            return Array.prototype.slice.call(
+              document.querySelectorAll(
+                '[class*="sidebarCol"]:not([data-whaless-ghost])'));
+          }
+
+          function widest(list) {
+            var max = 0;
+            for (var i = 0; i < list.length; i++) {
+              var w = list[i].getBoundingClientRect().width;
+              if (w > max) { max = w; }
+            }
+            return max;
+          }
+
+          // 侧栏状态上报：原生按钮的位置和显隐都靠它。
+          // 折叠动画 0.3s 期间会连发一串，有 lastSent 去重，静止时一条也不发。
+          var lastSent = '';
+          function report(list) {
+            if (!list || !list.length) { return; }
+            var width = Math.round(widest(list));
+            if (width <= 0) { return; }
+            var collapsed = !!document.querySelector('[data-sidebar-collapsed]');
+            // 属性还没上来的首帧用宽度兜底（56px 窄条 = 折叠）。
+            if (!collapsed && width < 200) { collapsed = true; }
+            var key = width + ':' + (collapsed ? '1' : '0');
+            if (key === lastSent) { return; }
+            lastSent = key;
+            if (window.webkit && window.webkit.messageHandlers
+                && window.webkit.messageHandlers.whaless) {
+              try {
+                window.webkit.messageHandlers.whaless
+                  .postMessage({ width: width, collapsed: collapsed });
+              } catch (e) {}
+            }
+          }
 
           function injectStyle() {
             if (document.getElementById('whaless-style')) { return; }
             var style = document.createElement('style');
             style.id = 'whaless-style';
-            // visibility 而不是 display：元素还在 DOM 里，JS .click() 照样触发它的事件
-            style.textContent = '[class*="sidebarCol"] [class*="toggle"]{visibility:hidden !important}';
+            // web 自己的折叠按钮彻底藏起来，由原生工具栏按钮承接折叠功能。
+            // visibility 而不是 display：元素还在 DOM 里，JS .click() 照样触发它的事件。
+            style.textContent = [
+              '[class*="sidebarCol"] [class*="toggle"]{visibility:hidden !important}',
+              '[class*="sidebar"] [class*="toggle"]{visibility:hidden !important}',
+              // 无标题栏下，侧栏内容要往下让出交通灯 + 两个液态玻璃按钮那一行。
+              '[class*="sidebarCol"]{padding-top:50px !important;box-sizing:border-box !important;}',
+              // ---- 顶部让位：把桌面端 `[data-platform=darwin]` 那套等价补回来 ----
+              // 上游 layout 里 darwin 模式会声明这两个变量（48px 标题栏 + 68px 浮层），
+              // 页面标题（`pageHead` / `pageHeading`，28px + clearance）和设置遮罩都用它。
+              // 壳不能直接打 data-platform=darwin：前端会等 preload 注入的
+              // `dshDesktopBoot`，等不到就不 mount（白屏）。所以变量自己声明，
+              // 各页面那条 darwin 分支下不来的规则也在这里补一条同类选择器。
+              ':root{--dsh-frame-top-clearance:48px;--dsh-frame-overlay-top:68px}',
+
+              // 注意排除 `pageHeading`：插件页里它是 `pageHead` 的子元素，名字里也含
+              // "pageHead"，两个都吃到 76px 就叠成 152px，标题掉到半屏。而自动化任务页
+              // 的标题恰好就叫 `pageHeading`（顶层），所以对它反过来排除「pageHead 的后代」，
+              // 两边互不误伤。
+              '[class*="pageHead"]:not([class*="pageHeading"]),'
+                + '[class*="pageHeading"]:not([class*="pageHead"] *),'
+                + '[class*="detailTop"],[class*="moreHead"]'
+                + '{padding-top:calc(28px + var(--dsh-frame-top-clearance,48px)) !important}',
+              // 折叠后主栏顶到左边，会话标题行会压在玻璃按钮底下。
+              // 桌面端的写法是 leading clearance 160px（标题行自己减去 20px 当内距）。
+              // 关键：挂在 frame 自己的 `data-sidebar-collapsed` 上，而不是 JS 加的类——
+              // React 改这个属性和折叠是同一帧，标题跟侧栏一起动，不会等 50ms 防抖
+              // 之后再补一次，看起来就像"闪一下"。
+              // 160px 是上游给 macOS 定的值（他们的按钮从 x=88 起、到 164 结束）。
+              // 我们的两个玻璃按钮是 SwiftUI 画的，位置略靠右（右缘约 166），
+              // 照 160 走标题只剩 2px 余量，所以补到 180——两边差 20px，肉眼就是
+              // "紧贴着"和"正常留白"的区别。标签行用同一条变量，仍然对齐。
+              '[data-sidebar-collapsed]{--dsh-frame-leading-clearance:180px}',
+              // 折叠后主栏往左吃掉那 56px 空轨道。
+              // 上游 layout 里 `collapsedWidth = darwin ? 0 : 56`：桌面端折叠时侧栏轨道
+              // 直接塌成 0，主栏从窗口左边缘开始，标题下的分隔线才会顶到边。我们走的是
+              // web 分支，留着 56px 图标轨道（虽然整列被藏了），主栏就从 56 开始画，
+              // 分隔线左边空一截。margin-left 负回 56：宽度是 stretch 自适应，
+              // 右边缘仍落在原处，只有左边缘越过去，正好把分隔线和内容一起带到边。
+              '[data-sidebar-collapsed] [class*="centerCol"]{margin-left:-56px !important}',
+              // ---- 折叠/展开：面板当一张图整块平移 ----
+              // 位移由 JS 每帧写入（见 __whalessAnim），这里只负责"长什么样"：
+              //   · 列宽收窄时内容不许重排 → 宽度钉在展开宽度
+              //   · 不裁切，让 .frame 的 overflow:hidden 在窗口边缘裁
+              // 右侧栏（dsh-client-ui-sidebar-right）是同一套思路的静态版：
+              //   transform:translateX(--dsh-sidebar-width) + visibility 延迟关闭。
+              '[class*="sidebarCol"]{overflow:visible !important;'
+                + 'border-right-width:0 !important}',
+              '[class*="sidebarCol"] > * > *{'
+                + 'width:var(--whaless-sidebar-w,280px) !important;'
+                + 'min-width:var(--whaless-sidebar-w,280px) !important;'
+                + 'max-width:none !important}',
+              // 合成层只在动画那 300ms 开：常开的话面板静止时也独占一层，
+              // 它的右缘会和主栏的分割线在合成器里对接出一条发亮的亚像素缝。
+              '[data-whaless-anim] [class*="sidebarCol"] > * > *,[data-whaless-ghost]'
+                + '{will-change:transform}',
+              // ---- 位移 = [data-sidebar-collapsed] 的纯 CSS 函数，和右侧栏同一套 ----
+              // 面板的过渡时长/曲线和列宽那条一模一样，两者在同一次样式重算里启动，
+              // 所以中间不需要任何 JS 参与，也不会"卡"。
+              '[class*="sidebarCol"] > * > *{'
+                + 'transition:transform var(--ds-transition-duration-slow,.3s) '
+                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1))}',
+              // 动画期间列（grid 单元，原地不动）永远铺一层"这块区域正常的底色"。
+              // 有复制品时它被整块遮住（复制品底色同源），看不见；没有复制品的
+              // 降级路径下它就是唯一的底，顶部让位区不会露出 web 底色（黑）。
+              // 之前这里是 transparent —— 一旦快照没就位，顶部立刻黑一块。
+              '[data-whaless-anim] [class*="sidebarCol"]:not([data-whaless-ghost])'
+                + '{background:var(--whaless-sidebar-bg,inherit) !important}',
+              // 折叠态：整块平移到窗口外（-100% = 展开宽度，永远对得上）。
+              '[data-sidebar-collapsed] [class*="sidebarCol"]:not([data-whaless-ghost]) > * > *'
+                + '{transform:translateX(-100%)}',
+              // 复制品的位移一律由 JS 逐帧写入（内联 !important），这里不能再给
+              // transition，否则每帧的修正会被过渡吞掉、永远追不上主栏。
+              '[data-whaless-ghost]{transition:none !important;visibility:visible !important}',
+              // 动画期间真身让位给冻结的那一份（复制品负责画面）。
+              // :not 排除复制品——它自己类名里也有 sidebarCol，不然会被一起藏掉。
+              '[data-whaless-frozen] [class*="sidebarCol"]:not([data-whaless-ghost])'
+                + '{visibility:hidden !important}',
+              // 宽版/图标版内容自带 0→1 淡入（`.wide` 在根上，`.railIn` 在子元素上）。
+              // 常开这条（不只动画期间）：动画结束后 React 若再补一帧渲染，
+              // 淡入会让整个面板"闪一下"。
+              '[class*="sidebarCol"] [class*="wide"],'
+                + '[class*="sidebarCol"] [class*="railIn"] *{animation:none !important}',
+              // 列宽过渡是整段动画的发动机：主栏左缘按它走，复制品逐帧贴着它滑。
+              // 丢了这条，列宽一帧跳完，什么平滑都无从谈起。
+              '[data-whaless-anim] [class*="frame"]{'
+                + 'transition:grid-template-columns var(--ds-transition-duration-slow,.3s) '
+                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
+              // 标题让位跟着侧栏一起过渡：只在壳主动切换的那一下挂，窗口缩放不拖慢。
+              '[data-whaless-anim] [class*="titleRow"],'
+                + '[data-whaless-anim] [class*="titleRow"] ~ [class*="tabs"]{'
+                + 'transition:padding-inline-start var(--ds-transition-duration-slow,.3s) '
+                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
+              '[data-whaless-anim] [class*="centerCol"]{'
+                + 'transition:margin-left var(--ds-transition-duration-slow,.3s) '
+                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
+              '@media (prefers-reduced-motion:reduce){',
+              '  [data-whaless-anim] [class*="titleRow"],'
+                + '[data-whaless-anim] [class*="titleRow"] ~ [class*="tabs"],'
+                + '[data-whaless-anim] [class*="centerCol"]{transition:none !important}',
+              '}',
+              // 会话页「对话 / 轨迹」是标题行下面单独一行（`grid-column:1/-1`），
+              // 上游只给标题行让位，折叠后两行左边缘会差 140px。同一条 clearance
+              // 补给它，两行文字左对齐（多出的 8px 是标题 crumb 自己的左右内距）。
+              '[class*="titleRow"] ~ [class*="tabs"]'
+                + '{padding-inline-start:calc(8px + max(0px, var(--dsh-frame-leading-clearance,0px) - 20px)) !important}',
+              // 禁止页面内部滚动容器的 overscroll 弹性回弹，否则双指拖动会露白边。
+              'html,body{overscroll-behavior:none !important;}',
+              '*{overscroll-behavior:none !important;}',
+              // 暗色模式下，React 渲染出深色主题前，html/body 的默认白底会闪一下。
+              '@media (prefers-color-scheme: dark){',
+              '  html{background:#141414 !important;color-scheme:dark;}',
+              '  body{background:#141414 !important;}',
+              '}'
+            ].join('\\n');
             (document.head || document.documentElement).appendChild(style);
+          }
+
+          // 折叠态：sidebarCol 收成 56px 窄条，整列彻底消失，主栏顶到左边。
+          // 只 visibility 不够——rail 里 `.sectionHeader` 的「添加工作区」按钮悬在列中间
+          // （垂直居中），而它自己那条链上写着 visibility:visible，把可见性又抢了回去，
+          // 结果左栏中间孤零零飘一个文件夹加号。
+          // 补 opacity / pointer-events：opacity 在父级形成合成层，子元素抢不回来。
+          var RAIL_HIDE = [
+            ['visibility', 'hidden'],
+            ['opacity', '0'],
+            ['pointer-events', 'none'],
+            ['background', 'transparent']
+          ];
+
+          // 展开态宽度缓存：动画那 280ms 里要把内容钉在这个宽度上，
+          // 不然列一边缩、内容一边重排，就又不是"一整块"了。
+          var expandedWidth = 280;
+
+          function animating() {
+            return document.documentElement.hasAttribute('data-whaless-anim');
+          }
+
+          // 折叠态的可见性压制，单独抽出来：动画一开始必须无条件清掉。
+          // 否则展开时列上还挂着折叠期留下的 `opacity:0;visibility:hidden`（内联
+          // !important），整段滑入都是隐形的，收尾才"啪"地出现 —— 就是"闪现"。
+          function setRailHide(el, on) {
+            for (var i = 0; i < RAIL_HIDE.length; i++) {
+              if (on) {
+                el.style.setProperty(RAIL_HIDE[i][0], RAIL_HIDE[i][1], 'important');
+              } else {
+                el.style.removeProperty(RAIL_HIDE[i][0]);
+              }
+            }
+          }
+
+          function clearRailHide() {
+            var list = sidebars();
+            for (var i = 0; i < list.length; i++) { setRailHide(list[i], false); }
+          }
+
+          // 上一拍读到的列宽，用来判断"是否已经稳定"。
+          var lastSampledW = 0;
+
+          // 侧栏顶部那块（给交通灯让位的 50px）在正常态显示的是什么颜色。
+          // 静止展开时采样一次存下来，克隆快照时直接拿它铺底 —— 只从"面板本体"
+          // 取色是不行的：折叠态列里没有面板节点，取到空值，顶部就会露出 web 底色。
+          var sidebarBg = '';
+
+          // 往上找第一个"真正不透明"的背景色（半透明的叠上去还是会露底，跳过）。
+          function solidBg(el) {
+            var cur = el;
+            while (cur && cur !== document.documentElement) {
+              var c = getComputedStyle(cur).backgroundColor;
+              if (c && c !== 'transparent') {
+                var m = c.match(/^rgba?[(](.*)[)]$/);
+                if (m) {
+                  var p = m[1].split(',');
+                  var a = p.length > 3 ? parseFloat(p[3]) : 1;
+                  if (a > 0.9) { return c; }
+                }
+              }
+              cur = cur.parentElement;
+            }
+            return '';
+          }
+
+          // 一列在"顶部让位区"实际显示的颜色：列自己不透明就用列的，否则往上找。
+          function topBgOf(col) {
+            var mid = col && col.firstElementChild;
+            var pan = mid && mid.firstElementChild;
+            return solidBg(col) || (pan ? solidBg(pan) : '')
+              || (document.body ? solidBg(document.body) : '');
+          }
+
+          // 快照是某一刻"拍"下来的，主题一换它就过时了（深色快照滑进浅色界面）。
+          // 记下拍摄时的主题指纹，复用前对一下，对不上就丢掉、退回真身滑入。
+          var savedTheme = '';
+
+          function themeKey() {
+            var html = document.documentElement;
+            var body = document.body;
+            var bg = body ? getComputedStyle(body).backgroundColor : '';
+            // 不看 html 的 style：那上面挂着自己的 --whaless-* 变量，动画期间会变，
+            // 会把自己误判成"主题变了"。
+            return (html.getAttribute('class') || '') + '|'
+              + (html.getAttribute('data-theme') || '') + '|'
+              + (document.body ? document.body.className : '') + '|' + bg;
           }
 
           function apply() {
             injectStyle();
-            var side = sidebar();
-            if (!side) { return; }
-            var width = side.getBoundingClientRect().width;
-            if (width > 0 && width < 200) {
-              // 折叠态：应用把它收成 56px 窄条，主栏宽度按这 56px 算的，占位不能动，
-              // 只让这条窄栏看不见。
-              side.style.setProperty('visibility', 'hidden', 'important');
-              side.style.setProperty('background', 'transparent', 'important');
-              document.documentElement.classList.add('whaless-rail');
-              return;
+            var list = sidebars();
+            if (!list.length) { return; }
+            // 动画期间一帧 JS 都不跑：宽度由原生那边用同一条曲线自己补间（见
+            // ShellModel.beginToggle），可见性也不能动。这里直接返回，省掉每帧的
+            // querySelectorAll + getBoundingClientRect + 跨进程 postMessage。
+            if (animating()) { return; }
+            report(list);
+            watch(list);
+            for (var k = 0; k < list.length; k++) {
+              var el = list[k];
+              var w = el.getBoundingClientRect().width;
+              // 展开宽度只认"连续两次采样一致"的值：动画刚结束那一拍如果还被
+              // observer 触发一次，读到的是中间宽度，拿它当展开宽度用，复制品
+              // 的宽度和位移会整体歪掉。
+              if (w >= 200) {
+                if (lastSampledW === w || lastSampledW === 0) {
+                  expandedWidth = Math.round(w);
+                  document.documentElement.style.setProperty(
+                    '--whaless-sidebar-w', expandedWidth + 'px');
+                  // 顺手把这块区域的底色记下来（只在真正展开、静止时采）。
+                  var tb = topBgOf(el);
+                  if (tb) {
+                    sidebarBg = tb;
+                    document.documentElement.style.setProperty(
+                      '--whaless-sidebar-bg', tb);
+                  }
+                }
+              }
+              lastSampledW = w;
+              if (w > 0 && w < 200) {
+                // 折叠态：整列彻底消失。
+                setRailHide(el, true);
+              } else if (w >= 200) {
+                // 展开态：完整恢复（过渡期间两份节点都可能在，各按各的宽度处理）。
+                setRailHide(el, false);
+              }
             }
-            side.style.removeProperty('visibility');
-            side.style.removeProperty('background');
-            document.documentElement.classList.remove('whaless-rail');
+            document.documentElement.classList.toggle('whaless-rail',
+              !!document.querySelector('[data-sidebar-collapsed]'));
+          }
+
+          // 每个见过的 sidebarCol 节点挂一次 ResizeObserver（WeakSet 去重）。
+          // 折叠动画期间每帧回调 apply()，宽度一路流给原生，按钮才跟得上分割线。
+          var ro = null;
+          var watched = (typeof WeakSet === 'function') ? new WeakSet() : null;
+          function watch(list) {
+            if (!watched || typeof ResizeObserver !== 'function') { return; }
+            if (!ro) { ro = new ResizeObserver(function () { apply(); }); }
+            for (var i = 0; i < list.length; i++) {
+              if (watched.has(list[i])) { continue; }
+              watched.add(list[i]);
+              ro.observe(list[i]);
+            }
           }
 
           var scheduled = false;
@@ -107,10 +430,228 @@ struct WebPane: NSViewRepresentable {
             setTimeout(function () { scheduled = false; apply(); }, 50);
           }
 
+          // ---- 折叠/展开：位移交给 CSS，JS 只负责"冻一张图" ----
+          //
+          // 右侧栏为什么顺（dsh-client-ui-sidebar-right）：面板 position:absolute，
+          // 只改 transform + 一条 transition —— 合成器动画，零重排、零 JS。
+          //
+          // 左侧栏之前是 JS 每帧读主栏左缘、写 CSS 变量、再跨进程上报，所以"卡"。
+          // 现在走同一条路：面板位移只由 `[data-sidebar-collapsed]` 这一个属性决定，
+          // 过渡时长/曲线和列宽那条完全一样。列宽过渡本来就有（应用自己在 frame 上
+          // 用 useLayoutEffect 打 `data-animating`，和 grid-template-columns 同一次提交），
+          // 主栏 margin 和面板 transform 也都在这同一次样式重算里启动 —— 三者同时起跑、
+          // 同一条曲线，位置天然吻合，整段动画中间一帧 JS 都不用跑。
+          //
+          // JS 只留一件 CSS 干不了的事：收起那一刻内容会从宽版换成图标版（React 行为），
+          // 提前克隆一份停在窗口上，让滑出去的始终是同一张图。复制品也放进 frame 里，
+          // 这样它在同一次重算里拿到 `data-sidebar-collapsed`，和列宽一起起跑。
+          var anim = null;
+          // 收起时留下的宽版快照。展开方向复用它：那样滑进来的自始至终是同一张
+          // 画面，不会出现 React 半路把图标版换成宽版（"滑到一半画面切了"）。
+          var savedGhost = null;
+
+          // 动画时长取应用自己的 token（默认 .3s）。兜底超时必须在这之上，
+          // 否则"到点强制收尾"会把还在滑的复制品撤掉 —— 画面就是滑到一半突然消失。
+          function durMs() {
+            var v = getComputedStyle(document.documentElement)
+              .getPropertyValue('--ds-transition-duration-slow').trim();
+            var n = parseFloat(v);
+            if (!n) { return 300; }
+            return v.indexOf('ms') > 0 ? n : n * 1000;
+          }
+
+          function frameEl() {
+            return document.querySelector('[class*="frame"]');
+          }
+
+          function copyScroll(from, to) {
+            var a = from.querySelectorAll('*');
+            var b = to.querySelectorAll('*');
+            for (var i = 0; i < a.length && i < b.length; i++) {
+              if (a[i].scrollTop) { b[i].scrollTop = a[i].scrollTop; }
+            }
+          }
+
+          // 挑出"真正画着面板"的那一列：优先含宽版内容的（`.wide`），其次最宽的。
+          // 不能只取 querySelector 的第一个——收起/展开的中间态里 DOM 里可能同时有两列。
+          function colToClone() {
+            var list = sidebars(), best = null, bestScore = -1;
+            for (var i = 0; i < list.length; i++) {
+              var el = list[i];
+              var r = el.getBoundingClientRect();
+              if (r.height < 80 || r.width <= 0) { continue; }
+              var score = r.width + (el.querySelector('[class*="wide"]') ? 1000 : 0);
+              if (score > bestScore) { bestScore = score; best = el; }
+            }
+            return best;
+          }
+
+          // 把这一列整块复制、钉在窗口上。宽度用缓存的展开宽度——列宽这会儿可能已经
+          // 收到 56 了，复制品必须按展开的样子出现，否则里面的内容会重排。
+          function makeGhost() {
+            var col = colToClone();
+            var frame = frameEl();
+            if (!col || !frame) { return null; }
+            var rect = col.getBoundingClientRect();
+            var ghost = col.cloneNode(true);
+            ghost.setAttribute('data-whaless-ghost', '');
+            // 面板本体从 y=50 起才有底色（上面是给交通灯让位的 padding），
+            // 复制品要整块（含那 50px）都有底色，否则滑入时顶部是黑的。
+            // 取色顺序：面板 → 这块区域的实际底色（静止时采的）→ 逐步往上找。
+            var mid2 = col.firstElementChild;
+            var pan2 = mid2 && mid2.firstElementChild;
+            var bg = (pan2 ? solidBg(pan2) : '') || sidebarBg || topBgOf(col);
+            var paint = bg ? 'background:' + bg + ' !important;' : '';
+            ghost.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + rect.top
+              + 'px;width:' + expandedWidth + 'px;height:' + rect.height + 'px;margin:0;'
+              + 'z-index:2147483000;pointer-events:none;overflow:hidden;box-sizing:border-box;'
+              + 'visibility:visible !important;' + paint;
+            frame.appendChild(ghost);
+            copyScroll(col, ghost);
+            savedTheme = themeKey();
+            return ghost;
+          }
+
+          // 复制品逐帧贴合主栏左缘。CSS 过渡和 grid 列宽过渡虽然参数相同，
+          // 但一个在合成器、一个在主线程，中间会差 1~3px —— 那点偏差就是
+          // "元素被背景切掉一点"。这里每帧读一次真实左缘，差多少补多少。
+          function follow() {
+            if (!anim || !anim.ghost) { return; }
+            try { followBody(); }
+            catch (err) {
+              try {
+                window.webkit.messageHandlers.whaless.postMessage(
+                  { log: 'anim error [follow] ' + (err && err.stack || err) });
+              } catch (x) {}
+              finish();
+            }
+          }
+
+          function followBody() {
+            var c = document.querySelector('[class*="centerCol"]');
+            var left = c ? c.getBoundingClientRect().left : 0;
+            anim.ghost.style.setProperty(
+              'transform', 'translateX(' + (left - expandedWidth) + 'px)', 'important');
+            var still = Math.abs(left - anim.lastLeft) < 0.5;
+            anim.lastLeft = left;
+            anim.still = still ? anim.still + 1 : 0;
+            var elapsed = performance.now() - anim.t0;
+            if ((anim.still >= 3 && elapsed > durMs() * 0.9)
+                || elapsed > durMs() * 1.6 + 200) {
+              finish();
+            } else {
+              anim.raf = requestAnimationFrame(follow);
+            }
+          }
+
+          // 真身面板此刻的实际位移。收尾时把复制品摆到同一个值上再撤，
+          // 否则"换人"那一帧会差 1~2px —— 就是展开末尾那一下抖动。
+          function panelTx() {
+            var col = document.querySelector(
+              '[class*="sidebarCol"]:not([data-whaless-ghost])');
+            var mid = col && col.firstElementChild;
+            var pan = mid && mid.firstElementChild;
+            if (!pan) { return 0; }
+            var m = getComputedStyle(pan).transform;
+            if (!m || m === 'none') { return 0; }
+            var inner = m.slice(m.indexOf('(') + 1, -1).split(',');
+            var tx = parseFloat(inner[4]);
+            return isNaN(tx) ? 0 : tx;
+          }
+
+          function finish() {
+            if (!anim) { return; }
+            var a = anim;
+            anim = null;
+            if (a.timer) { clearTimeout(a.timer); }
+            if (a.raf) { cancelAnimationFrame(a.raf); }
+            if (a.frame && a.onEnd) { a.frame.removeEventListener('transitionend', a.onEnd); }
+            var html = document.documentElement;
+            if (a.ghost && a.ghost.parentNode) {
+              // 先把复制品挪到真身的位置（差多少补多少），再让它退场：
+              // 正反两个方向最后都严丝合缝，不会"到点抖一下"。
+              a.ghost.style.setProperty(
+                'transform', 'translateX(' + panelTx() + 'px)', 'important');
+            }
+            // 真身先露面，复制品后撤 —— 顺序反了会空一帧。
+            html.removeAttribute('data-whaless-frozen');
+            if (a.ghost && a.ghost.parentNode) {
+              a.ghost.parentNode.removeChild(a.ghost);
+              // 收起的快照留着：下一次展开要靠它，否则会滑到一半换内容。
+              a.ghost.style.removeProperty('transform');
+              savedGhost = a.ghost;
+            }
+            html.removeAttribute('data-whaless-anim');
+            apply();
+            // 原生侧在动画窗口内故意不理宽度上报，而 report() 已经记过 lastSent，
+            // 不重置的话最终宽度永远送不过去（按钮位置会停在补间的终点值上）。
+            setTimeout(function () { lastSent = ''; apply(); }, 150);
+          }
+
+          window.__whalessAnim = {
+            // 原生点按钮之前调：冻画面、挂结束监听；真正的位移在点下去那一帧由 CSS 接管。
+            begin: function () {
+              if (anim) { finish(); }
+              var html = document.documentElement;
+              var frame = frameEl();
+              var collapsing = !document.querySelector('[data-sidebar-collapsed]');
+              anim = { ghost: null, frame: frame, timer: 0, onEnd: null,
+                       t0: performance.now(), lastLeft: -1, still: 0, raf: 0,
+                       collapsing: collapsing };
+              if (collapsing) {
+                // 收起：内容马上要换成图标版，先冻一份。
+                anim.ghost = makeGhost();
+                if (anim.ghost) { html.setAttribute('data-whaless-frozen', ''); }
+              } else {
+                // 展开：清掉折叠期留下的可见性压制，否则整段滑入是隐形的、收尾才"啪"出现。
+                clearRailHide();
+                // 展开也要冻：折叠态 DOM 里只有图标版，React 会在滑到一半时把它换成
+                // 宽版 —— 那就是"滑到一半画面切了"。复用收起时留下的宽版快照，
+                // 从窗外原样滑进来。
+                if (savedGhost && savedTheme !== themeKey()) {
+                  // 主题变了：旧快照作废，让真身自己滑进来（内容会换，但颜色不会错）。
+                  savedGhost = null;
+                }
+                if (savedGhost && frame) {
+                  var g = savedGhost;
+                  savedGhost = null;
+                  g.style.setProperty('transform',
+                    'translateX(-' + expandedWidth + 'px)', 'important');
+                  frame.appendChild(g);
+                  anim.ghost = g;
+                  html.setAttribute('data-whaless-frozen', '');
+                }
+              }
+              html.setAttribute('data-whaless-anim', '');
+              if (frame) {
+                anim.onEnd = function (e) {
+                  if (e.target === frame && e.propertyName === 'grid-template-columns') {
+                    finish();
+                  }
+                };
+                frame.addEventListener('transitionend', anim.onEnd);
+              }
+              // 兜底：万一没触发 transitionend（列宽没变），别把画面一直冻着。
+              // 必须晚于动画本身，否则会在半路把复制品撤掉。
+              anim.timer = setTimeout(finish, durMs() * 1.6 + 300);
+            },
+
+            // 点完按钮同步调用：有复制品就交给逐帧贴边（比 CSS 过渡准 1~3px）；
+            // 没有复制品（缓存还没建立）就让 CSS 过渡兜着走。
+            afterClick: function () {
+              if (!anim || !anim.ghost) { return; }
+              anim.t0 = performance.now();
+              anim.lastLeft = -1;
+              anim.still = 0;
+              anim.raf = requestAnimationFrame(follow);
+            }
+          };
+
           apply();
           document.addEventListener('DOMContentLoaded', apply);
           window.addEventListener('load', apply);
-          new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+          new MutationObserver(schedule)
+            .observe(document.documentElement, { childList: true, subtree: true });
           setInterval(apply, 600);
         })();
         """
@@ -120,7 +661,8 @@ struct WebPane: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate,
+        WKScriptMessageHandler {
         private let model: ShellModel
         private let origin: URL
         weak var webView: WKWebView?
@@ -129,6 +671,21 @@ struct WebPane: NSViewRepresentable {
         init(model: ShellModel, origin: URL) {
             self.model = model
             self.origin = origin
+        }
+
+        /// 侧栏状态上报：只在主线程改 @Published，SwiftUI 按钮的位置跟着分割线走。
+        func userContentController(_ userContentController: WKUserContentController,
+                                   didReceive message: WKScriptMessage) {
+            guard message.name == "whaless",
+                  let body = message.body as? [String: Any] else { return }
+            if let log = body["log"] as? String {
+                ShellLog.write(log)
+                return
+            }
+            guard let width = (body["width"] as? NSNumber)?.doubleValue,
+                  width > 0 else { return }
+            let collapsed = (body["collapsed"] as? NSNumber)?.boolValue ?? false
+            model.reportSidebar(width: width, collapsed: collapsed)
         }
 
         private func isLocal(_ url: URL) -> Bool {
@@ -200,8 +757,30 @@ struct WebPane: NSViewRepresentable {
                           var side = document.querySelector('[class*="sidebarCol"]');
                           var m = document.querySelector('[class*="centerCol"]');
                           function w(el) { return el ? Math.round(el.getBoundingClientRect().width) : '-'; }
+                          // 探测侧栏内部「真实内容根」的 top（quietBars / logoRow），
+                          // 验证 padding-top 是否真的把它压到按钮（y≈44）下方。
+                          var firstTop = '-';
+                          var pad = '-';
+                          // 页面标题（插件 / 自动化任务这类整页视图）的顶部内距。
+                          // 壳靠 `[class*="pageHead"]` 补到 28+48px；哪天取到 28px，
+                          // 说明前端改了类名，标题就又会钻到玻璃按钮底下。
+                          var headPad = '-';
+                          var head = document.querySelector('[class*="pageHead"]');
+                          if (head) { headPad = getComputedStyle(head).paddingTop; }
+                          if (side) {
+                            pad = getComputedStyle(side).paddingTop;
+                            var qb = side.querySelector('[class*="quietBars"]')
+                                 || side.querySelector('[class*="logoRow"]')
+                                 || side.querySelector('[class*="root"]');
+                            if (qb) {
+                              var r = qb.getBoundingClientRect();
+                              firstTop = Math.round(r.top) + '/' + Math.round(r.height);
+                            }
+                          }
                           return 'side=' + w(side) + ' center=' + w(m)
-                            + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0');
+                            + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0')
+                            + ' pad=' + pad + ' quietTop=' + firstTop
+                            + ' headPad=' + headPad;
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")

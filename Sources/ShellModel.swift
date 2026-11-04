@@ -17,6 +17,70 @@ final class ShellModel: ObservableObject {
 
     @Published private(set) var phase: Phase = .starting("正在查找 harness…")
 
+    /// 侧栏当前宽度（由 web 端 ResizeObserver 上报，取 DOM 里最宽的那个 sidebarCol）。
+    /// 原生按钮的位置依赖它：展开时贴着分割线，折叠后回交通灯旁。
+    /// 默认 280 = 上游展开态的标准宽。
+    @Published private(set) var sidebarWidth: CGFloat = 280
+
+    /// 折叠态直接读 React 打在自己 frame 上的 `data-sidebar-collapsed`，
+    /// 不信宽度阈值（DOM 里可能同时有展开列和 rail 两个节点）。
+    @Published private(set) var sidebarCollapsed = false
+
+    /// 首次上报 = 页面真的渲染出来了。在那之前顶部按钮整套不显示。
+    @Published private(set) var webContentReady = false
+
+    /// 折叠/展开动画窗口。这 0.3s 里 web 那边一帧 JS 都不跑，按钮位置由这里自己补间：
+    /// 玻璃效果（GlassEffectContainer）每帧重渲染一次很贵，逐帧喂宽度会把整段动画
+    /// 拖到 40fps —— 这正是左侧栏"不如右侧栏顺"的主因。改用一条和 CSS 完全相同的
+    /// 缓动曲线（0.3s / cubic-bezier(.4,0,.2,1)），整段只渲染一次。
+    private var toggleAnimUntil: Date?
+    /// 最近一次展开态的宽度（折叠时用它当展开目标）。
+    private var lastExpandedWidth: CGFloat = 280
+
+    func beginToggle() {
+        let target: CGFloat = sidebarCollapsed ? lastExpandedWidth : 56
+        toggleAnimUntil = Date().addingTimeInterval(0.36)
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
+            sidebarCollapsed = !sidebarCollapsed
+            sidebarWidth = target
+        }
+    }
+
+    /// web → 原生的上报入口（WKScriptMessageHandler 主线程回调）。
+    ///
+    /// 位置由宽度流驱动（每帧更新、天然跟手），这里只管两类"离散事件"：
+    /// 首次上报（整套按钮淡入）、折叠态翻转（给加号的 transition 一个动画事务，
+    /// 让它跟着折叠钮一起边滑边现/隐）。
+    func reportSidebar(width: Double, collapsed: Bool) {
+        // 动画窗口内一律不理：位置由 beginToggle 那条曲线负责，这里再插一脚只会打架。
+        if let until = toggleAnimUntil {
+            if Date() < until { return }
+            toggleAnimUntil = nil
+        }
+        let next = CGFloat(width)
+        if next >= 200 { lastExpandedWidth = next }
+        let wasReady = webContentReady
+        if !wasReady {
+            webContentReady = true
+            withAnimation(.easeOut(duration: 0.35)) {
+                sidebarWidth = next
+                sidebarCollapsed = collapsed
+            }
+        } else if collapsed != sidebarCollapsed {
+            // 宽度现在是 web 那边一路流过来的（壳给 grid 列开了 280ms 过渡），
+            // 位置直接跟每一帧走就行，别再包 withAnimation——包了反而比分割线慢半拍。
+            // 只有加号的显隐需要补间：让它跟着这趟滑动淡入/淡出，而不是终点处弹一下。
+            sidebarWidth = next
+            withAnimation(.easeInOut(duration: 0.28)) {
+                sidebarCollapsed = collapsed
+            }
+        } else {
+            sidebarWidth = next
+        }
+        ShellLog.write("sidebar width: \(Int(width)) collapsed=\(collapsed)"
+            + (wasReady ? "" : " first"))
+    }
+
     private let runner = ServerRunner()
     private var booted = false
     private weak var webView: WKWebView?
@@ -100,16 +164,43 @@ final class ShellModel: ObservableObject {
     /// `visibility:hidden` 的元素依然能 `.click()`，所以按钮藏起来不影响这条路径。
     func toggleSidebar() {
         guard let webView else { return }
+        // 先让原生按钮自己起跑（和 web 侧同一条曲线），再触发 web 的状态机。
+        beginToggle()
         webView.evaluateJavaScript("""
             (function () {
+              // 收起：begin() 先把当前这一帧冻成一份复制品（真身随即让位），
+              // 这样 React 把内容换成图标版也看不见，滑出去的始终是同一张图。
+              if (window.__whalessAnim) { window.__whalessAnim.begin(); }
               var side = document.querySelector('[class*="sidebarCol"]');
               var toggle = side && side.querySelector('[class*="toggle"]');
-              if (toggle) { toggle.click(); return 'ok'; }
-              return 'no-toggle';
+              if (!toggle) {
+                if (window.__whalessAnim) { window.__whalessAnim.afterClick(); }
+                return 'no-toggle';
+              }
+              toggle.click();
+              // 同一帧内把位移摆到位并开始逐帧跟随主栏左缘。
+              if (window.__whalessAnim) { window.__whalessAnim.afterClick(); }
+              return 'ok';
             })()
             """) { value, error in
             let result = value as? String ?? error?.localizedDescription ?? "-"
             ShellLog.write("sidebar toggle: \(result)")
+            // 折叠后确认三件事都到位：窄栏被整列藏掉、主栏顶到左边、
+            // 页面标题行按 leading clearance 让开了玻璃按钮。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                webView.evaluateJavaScript("""
+                    (function () {
+                      var side = document.querySelector('[class*="sidebarCol"]');
+                      var row = document.querySelector('[class*="titleRow"]');
+                      function w(el) { return el ? Math.round(el.getBoundingClientRect().width) : '-'; }
+                      return 'side=' + w(side)
+                        + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0')
+                        + ' titleRowPad=' + (row ? getComputedStyle(row).paddingLeft : '-');
+                    })()
+                    """) { v, _ in
+                    ShellLog.write("rail: \(v as? String ?? "-")")
+                }
+            }
         }
     }
 
