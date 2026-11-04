@@ -239,8 +239,7 @@ struct WebPane: NSViewRepresentable {
               list.push({
                 x: Math.round(r.left), y: Math.round(r.top),
                 w: Math.round(r.width), h: Math.round(r.height),
-                title: titleNode ? String(titleNode.textContent).trim()
-                  : String(node.textContent).trim().split('\n')[0],
+                title: titleNode ? String(titleNode.textContent).trim() : '',
                 desc: descNode ? String(descNode.textContent).trim() : '',
                 icon: icon
               });
