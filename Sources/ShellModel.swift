@@ -155,6 +155,7 @@ final class ShellModel: ObservableObject {
         var id: String
         var x: CGFloat
         var y: CGFloat
+        var enabled = true
     }
 
     @Published private(set) var pageButtons: [PageButton] = []
@@ -166,10 +167,15 @@ final class ShellModel: ObservableObject {
             return PageButton(id: key, x: CGFloat(truncating: pair[0]),
                               y: CGFloat(truncating: pair[1]))
         }
+        var splitEnabled = (raw["splitEnabled"] as? NSNumber)?.boolValue ?? true
         var next: [PageButton] = []
         if let b = point("expand") { next.append(b) }
         if let b = point("mode") { next.append(b) }
         if let b = point("collapse") { next.append(b) }
+        if var b = point("split") {
+            b.enabled = splitEnabled
+            next.append(b)
+        }
         let full = (raw["fullscreen"] as? NSNumber)?.boolValue ?? false
         if next != pageButtons { pageButtons = next }
         if full != pageRightFullscreen { pageRightFullscreen = full }
@@ -183,11 +189,14 @@ final class ShellModel: ObservableObject {
         case "expand": selector = "[data-sidebar-right-expand]"
         case "mode": selector = "[data-sidebar-right-mode]"
         case "collapse": selector = "[data-sidebar-right-toggle]"
+        case "split": selector = "[data-dockkit-split-button]"
         default: return
         }
+        // 点完连着刷几次 apply：面板开合有自己的动画，等它落位按钮再原地出来。
         webView.evaluateJavaScript(
             "(function(){var b=document.querySelector('" + selector
-            + "'); if(b){b.click(); return 'ok';} return 'none';})()") { value, error in
+            + "'); if(b){b.click(); for(var i=1;i<=18;i++){"
+            + "setTimeout(window.__whalessApply, i*60);} return 'ok';} return 'none';})()") { value, error in
             let result = value as? String ?? error?.localizedDescription ?? "-"
             ShellLog.write("right button " + id + ": " + result)
         }

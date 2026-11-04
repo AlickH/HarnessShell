@@ -167,6 +167,9 @@ struct WebPane: NSViewRepresentable {
           // 原生推来的"系统内容底色"（NSColor.textBackgroundColor 按当前外观解析）。
           // 这是真正的 macOS 系统色，不是主题里写死的亮/暗值：直接压到主题的
           // base token 上，内容区所有吃这个 token 的容器就都跟系统色走。
+          // 点击后短时间内多刷几次（面板开合有自己的动画，等它落位按钮才出来）。
+          window.__whalessApply = function () { apply(); };
+
           window.__whalessContentBg = function (value) {
             if (!value || !document.body) { return; }
             document.body.style.setProperty('--dsw-alias-bg-base', value, 'important');
@@ -197,12 +200,32 @@ struct WebPane: NSViewRepresentable {
             if (r.width <= 0 || r.height <= 0) { return null; }
             return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)];
           }
+          // 面板在滑动时先不报：那期间按钮的 rect 是动画中间值，报了原生按钮
+          // 就会跟着满屏跑。等它落位再一次性出来（原地显隐，不跟着滑）。
+          function panelSettled(panel) {
+            if (!panel) { return false; }
+            if (!panel.hasAttribute('data-sidebar-right-open')) { return false; }
+            if (typeof panel.getAnimations !== 'function') { return true; }
+            var anims = panel.getAnimations({ subtree: true });
+            for (var i = 0; i < anims.length; i++) {
+              var a = anims[i];
+              if (a.playState === 'running'
+                  && a.transitionProperty === 'transform') { return false; }
+            }
+            return true;
+          }
           function reportRightButtons() {
             var panel = document.querySelector('[data-sidebar-right-panel]');
+            var showPanelButtons = panelSettled(panel);
+            var splitEl = showPanelButtons
+              ? document.querySelector('[data-dockkit-split-button]') : null;
             var data = {
               expand: rectCenter('[data-sidebar-right-expand]'),
-              mode: rectCenter('[data-sidebar-right-mode]'),
-              collapse: rectCenter('[data-sidebar-right-toggle]'),
+              mode: showPanelButtons ? rectCenter('[data-sidebar-right-mode]') : null,
+              collapse: showPanelButtons ? rectCenter('[data-sidebar-right-toggle]') : null,
+              split: splitEl ? rectCenter('[data-dockkit-split-button]') : null,
+              // 分栏能不能用由页面决定（单 tab 时是禁用的），原生按钮要跟着变灰。
+              splitEnabled: !!(splitEl && !splitEl.disabled),
               fullscreen: !!(panel
                 && panel.getAttribute('data-sidebar-right-panel') === 'fullscreen')
             };
@@ -262,7 +285,8 @@ struct WebPane: NSViewRepresentable {
               // 同样用 visibility：元素还在 DOM 里，原生按钮 .click() 调同一个事件。
               '[data-sidebar-right-expand],'
                 + '[data-sidebar-right-mode],'
-                + '[data-sidebar-right-toggle]{visibility:hidden !important}',
+                + '[data-sidebar-right-toggle],'
+                + '[data-dockkit-split-button]{visibility:hidden !important}',
               // 无标题栏下，侧栏内容要往下让出交通灯 + 两个液态玻璃按钮那一行。
               '[class*="sidebarCol"]{padding-top:50px !important;box-sizing:border-box !important;}',
               // ---- 侧栏毛玻璃：页面只负责"别把材质盖住" ----

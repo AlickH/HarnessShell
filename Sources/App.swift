@@ -224,6 +224,7 @@ private struct PageChromeButtons: View {
             return model.pageRightFullscreen
                 ? "arrow.down.right.and.arrow.up.left"
                 : "arrow.up.left.and.arrow.down.right"
+        case "split": return "rectangle.split.2x1"
         default: return "sidebar.right"
         }
     }
@@ -232,6 +233,7 @@ private struct PageChromeButtons: View {
         switch id {
         case "expand": return "展开右侧栏"
         case "mode": return model.pageRightFullscreen ? "退出全屏" : "全屏"
+        case "split": return "分栏"
         default: return "收起右侧栏"
         }
     }
@@ -249,6 +251,8 @@ private struct PageChromeButtons: View {
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
                 .help(help(for: button.id))
+                .opacity(button.enabled ? 1 : 0.4)
+                .disabled(!button.enabled)
                 .offset(x: button.x - 14, y: button.y - 14)
             }
         }
