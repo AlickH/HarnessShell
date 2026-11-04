@@ -259,46 +259,6 @@ final class ShellModel: ObservableObject {
         openInAppItems = entries(from: raw["apps"])
     }
 
-    /// 右侧栏引导卡片：原生重绘用（玻璃卡 + 点击回点网页）。
-    struct GuideEntry: Identifiable, Equatable {
-        let index: Int
-        let rect: CGRect
-        let title: String
-        let desc: String
-        let icon: NSImage?
-
-        var id: Int { index }
-    }
-
-    @Published private(set) var guideEntries: [GuideEntry] = []
-
-    func reportGuideEntries(_ raw: [[String: Any]]) {
-        var next: [GuideEntry] = []
-        for (index, item) in raw.enumerated() {
-            guard let x = item["x"] as? NSNumber, let y = item["y"] as? NSNumber,
-                  let w = item["w"] as? NSNumber, let h = item["h"] as? NSNumber else { continue }
-            var icon: NSImage?
-            if let dataURL = item["icon"] as? String,
-               let comma = dataURL.firstIndex(of: ","),
-               let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) {
-                icon = NSImage(data: data)
-            }
-            next.append(GuideEntry(
-                index: index,
-                rect: CGRect(x: CGFloat(truncating: x), y: CGFloat(truncating: y),
-                             width: CGFloat(truncating: w), height: CGFloat(truncating: h)),
-                title: item["title"] as? String ?? "",
-                desc: item["desc"] as? String ?? "",
-                icon: icon))
-        }
-        if !next.isEmpty || !guideEntries.isEmpty { guideEntries = next }
-    }
-
-    func clickGuide(_ index: Int) {
-        webView?.evaluateJavaScript(
-            "window.__whalessClickGuide && window.__whalessClickGuide(\(index))")
-    }
-
     /// 用系统 NSMenu 展示这两个按钮的菜单（菜单项来自网页，选择后回点网页条目）。
     func showSystemMenu(_ kind: String) {
         let items = kind == "apps" ? openInAppItems : sessionMenuItems

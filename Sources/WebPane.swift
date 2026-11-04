@@ -214,51 +214,6 @@ struct WebPane: NSViewRepresentable {
             }
             return true;
           }
-          // 右侧栏引导卡片：原生重绘成玻璃卡，网页里那几张藏掉但保留可点。
-          var lastGuideSent = '';
-          function reportGuideEntries() {
-            var nodes = document.querySelectorAll('[data-sidebar-right-guide-entry]');
-            var list = [];
-            for (var i = 0; i < nodes.length; i++) {
-              var node = nodes[i];
-              var r = node.getBoundingClientRect();
-              if (r.width <= 0 || r.height <= 0) { continue; }
-              var titleNode = node.querySelector('[class*="entryTitle"]');
-              var descNode = node.querySelector('[class*="entryDescription"]');
-              var iconNode = node.querySelector('img');
-              var icon = null;
-              if (iconNode && iconNode.complete && iconNode.naturalWidth > 0) {
-                try {
-                  var canvas = document.createElement('canvas');
-                  canvas.width = 64;
-                  canvas.height = 64;
-                  canvas.getContext('2d').drawImage(iconNode, 0, 0, 64, 64);
-                  icon = canvas.toDataURL('image/png');
-                } catch (e) {}
-              }
-              list.push({
-                x: Math.round(r.left), y: Math.round(r.top),
-                w: Math.round(r.width), h: Math.round(r.height),
-                title: titleNode ? String(titleNode.textContent).trim() : '',
-                desc: descNode ? String(descNode.textContent).trim() : '',
-                icon: icon
-              });
-            }
-            var key = JSON.stringify(list.map(function (e) {
-              return [e.x, e.y, e.w, e.h, e.title];
-            }));
-            if (key === lastGuideSent) { return; }
-            lastGuideSent = key;
-            try {
-              window.webkit.messageHandlers.whaless.postMessage({ guideEntries: list });
-            } catch (e) {}
-          }
-
-          window.__whalessClickGuide = function (index) {
-            var nodes = document.querySelectorAll('[data-sidebar-right-guide-entry]');
-            if (nodes[index]) { nodes[index].click(); }
-          };
-
           // 会话页右上角：开在应用里（split 控件）+ 更多操作（…）。
           // 位置报给原生画玻璃按钮；它们的菜单项也由原生用系统菜单来展示，
           // 这里只在后台"开一下菜单读 DOM、马上关掉"（探测期间弹出层被 CSS 藏住）。
@@ -534,8 +489,6 @@ struct WebPane: NSViewRepresentable {
               // 落位后原生胶囊接上时形状一致，不会"从圆角矩形跳到胶囊"。
               '[class*="sidebarCol"] [class*="newSession"]'
                 + '{border-radius:999px !important}',
-              // 右侧栏引导卡片由原生重绘（玻璃卡）。
-              '[data-sidebar-right-guide-entry]{visibility:hidden !important}',
               // 会话页右上角两个控件改由原生接管（开在应用里 / 更多操作）。
               'button[aria-label="更多操作"],[data-open-target]'
                 + '{visibility:hidden !important}',
@@ -827,7 +780,6 @@ struct WebPane: NSViewRepresentable {
             reportRightButtons();
             reportNewSession();
             reportSessionHeader();
-            reportGuideEntries();
             watch(list);
             for (var k = 0; k < list.length; k++) {
               var el = list[k];
@@ -1272,9 +1224,6 @@ struct WebPane: NSViewRepresentable {
             }
             if let labels = body["menuLabels"] as? [String: Any] {
                 model.reportMenuLabels(labels)
-            }
-            if let entries = body["guideEntries"] as? [[String: Any]] {
-                model.reportGuideEntries(entries)
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
                 model.reportTheme(dark: dark)
