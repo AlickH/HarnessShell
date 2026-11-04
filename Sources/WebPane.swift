@@ -135,6 +135,40 @@ struct WebPane: NSViewRepresentable {
             return max;
           }
 
+          // ---- 内容区跟随系统 ----
+          // 要求是"跟系统外观走、用系统色"，不是页面自己选的亮/暗主题：
+          // 所以在这里把 body 的深色标记按 macOS 外观强制同步（应用自己改了也按回去），
+          // 内容区底色再由原生把 NSColor 系统色推过来。
+          var darkQuery = null;
+          function syncSystemTheme() {
+            var body = document.body;
+            if (!body || !window.matchMedia) { return; }
+            var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (body.hasAttribute('data-ds-dark-theme') !== dark) {
+              body.toggleAttribute('data-ds-dark-theme', dark);
+            }
+          }
+          function watchSystemTheme() {
+            if (!window.matchMedia) { return; }
+            syncSystemTheme();
+            if (darkQuery) { return; }
+            darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            var onChange = function () {
+              syncSystemTheme();
+              reportTheme();
+            };
+            if (darkQuery.addEventListener) {
+              darkQuery.addEventListener('change', onChange);
+            } else if (darkQuery.addListener) {
+              darkQuery.addListener(onChange);
+            }
+          }
+          // 原生推系统色过来（十六进制），内容区的底就用它。
+          window.__whalessContentBg = function (value) {
+            if (!value) { return; }
+            document.documentElement.style.setProperty('--whaless-content-bg', value);
+          };
+
           // 页面主题单独上报：原生毛玻璃材质跟着它走。不能等侧栏 DOM——
           // React mount 之前那几秒窗口已经在显示了，材质得先是对的颜色。
           var lastThemeSent = '';
@@ -142,15 +176,11 @@ struct WebPane: NSViewRepresentable {
             var body = document.body;
             if (!body) { return; }
             var dark = body.hasAttribute('data-ds-dark-theme');
-            // 主题是"明确亮/暗"还是"跟随系统"：后者不能再把窗口外观钉死，
-            // 否则系统切亮暗时跑不到网页的 prefers-color-scheme 上。
-            var source = document.documentElement.dataset.dsThemeSource || '';
-            var key = (dark ? '1' : '0') + ':' + source;
+            var key = dark ? '1' : '0';
             if (key === lastThemeSent) { return; }
             lastThemeSent = key;
             try {
-              window.webkit.messageHandlers.whaless.postMessage(
-                { dark: dark, themeSource: source });
+              window.webkit.messageHandlers.whaless.postMessage({ dark: dark });
             } catch (e) {}
           }
 
@@ -218,8 +248,12 @@ struct WebPane: NSViewRepresentable {
                 + 'color-mix(in srgb,var(--dsw-specific-sidebar-fill) 50%,transparent)'
                 + ' !important}',
               '[class*="sidebarCol"] > * > *{background:transparent !important}',
-              // 其余区域保持实色：右侧栏在 web 模式下自己不带底，不补的话打开时会透。
-              '[class*="rightbarCol"]{background:var(--dsw-alias-bg-base) !important}',
+              // 其它区域保持实色：右侧栏在 web 模式下自己不带底，不补的话打开时会透。
+              // 内容区底色改用系统色（原生按外观推过来的 --whaless-content-bg）：
+              // 要求"跟系统外观走"，而不是页面主题自己的亮暗值。侧栏那层不动（玻璃）。
+              '[class*="centerCol"],[class*="bottomRow"],[class*="rightbarCol"]'
+                + '{background:var(--whaless-content-bg,var(--dsw-alias-bg-base))'
+                + ' !important}',
               // 会话列表底部那条渐隐是"渐隐到侧栏实色底"的：侧栏改玻璃之后它
               // 会变成一条盖住材质的实色条，直接去掉（列表本身滚动不受影响）。
               '[class*="sidebarCol"] [class*="_fade"]{display:none !important}',
@@ -330,8 +364,8 @@ struct WebPane: NSViewRepresentable {
               // 列宽跳变后主栏比窗口窄（展开态那一侧），滑动时尾边会露底；
               // 动画期间给 frame 铺一层和主栏同色的底盖住，收尾就撤。
               '[data-whaless-anim] [class*="frame"]{'
-                + 'background:var(--dsw-alias-bg-base) !important;'
-                + 'transition:none !important}',
+                + 'background:var(--whaless-content-bg,var(--dsw-alias-bg-base))'
+                + ' !important;transition:none !important}',
               // 标题让位跟着侧栏一起过渡：只在壳主动切换的那一下挂，窗口缩放不拖慢。
               '[data-whaless-anim] [class*="titleRow"],'
                 + '[data-whaless-anim] [class*="titleRow"] ~ [class*="tabs"]{'
@@ -438,6 +472,7 @@ struct WebPane: NSViewRepresentable {
 
           function apply() {
             injectStyle();
+            watchSystemTheme();
             reportTheme();
             markRightSeen();
             var list = sidebars();
@@ -898,8 +933,7 @@ struct WebPane: NSViewRepresentable {
                 return
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
-                let source = body["themeSource"] as? String ?? ""
-                model.reportTheme(dark: dark, source: source)
+                model.reportTheme(dark: dark)
             }
             guard let width = (body["width"] as? NSNumber)?.doubleValue,
                   width > 0 else { return }
@@ -967,6 +1001,7 @@ struct WebPane: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             provisionalRetries = 0
+            model.pushContentBackground()
             ShellLog.write("didFinish \(webView.url.map(ShellLog.redact) ?? "-")")
             // 白屏排查：把页面标题和首屏文字记下来，能立刻区分"没加载"和"加载了但渲染空"。
             for delay in [0.0, 6.0, 14.0] {

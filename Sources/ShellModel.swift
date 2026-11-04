@@ -50,15 +50,32 @@ final class ShellModel: ObservableObject {
             ?? (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
     }
 
-    /// 页面主题来源："system" 表示跟随系统（此时窗口外观别钉死），"light"/"dark" 是明确选择。
-    @Published private(set) var pageThemeSource = ""
-
     /// web 端已经把 theme 单独上报过来了（不依赖侧栏渲染，页面一挂就报）。
-    func reportTheme(dark: Bool, source: String) {
-        if pageThemeSource != source { pageThemeSource = source }
+    /// 注意页面主题现在已经按系统外观强制同步（见注入脚本的 syncSystemTheme）。
+    func reportTheme(dark: Bool) {
         guard pageDark != dark else { return }
         pageDark = dark
         UserDefaults.standard.set(dark, forKey: Self.pageDarkKey)
+        pushContentBackground()
+    }
+
+    /// 把 macOS 的"内容区底色"（NSColor.textBackgroundColor）推给页面：
+    /// 内容背景要求跟系统外观走、用系统色，而不是页面主题自己的亮暗值。
+    func pushContentBackground() {
+        guard let webView else { return }
+        var color = NSColor.textBackgroundColor
+        let appearance = NSAppearance(named: pageDark ? .darkAqua : .aqua)
+        appearance?.performAsCurrentDrawingAppearance {
+            color = NSColor.textBackgroundColor
+        }
+        guard let srgb = color.usingColorSpace(.sRGB) else { return }
+        let hex = String(
+            format: "#%02x%02x%02x",
+            Int(round(srgb.redComponent * 255)),
+            Int(round(srgb.greenComponent * 255)),
+            Int(round(srgb.blueComponent * 255)))
+        webView.evaluateJavaScript(
+            "window.__whalessContentBg && window.__whalessContentBg('" + hex + "')")
     }
 
     func beginToggle() {

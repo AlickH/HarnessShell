@@ -19,10 +19,8 @@ struct WhalessApp: App {
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
                 .ignoresSafeArea()
-                // 页面明确选了亮/暗才把窗口外观钉过去；选的是"跟随系统"就放开，
-                // 否则会把网页的 prefers-color-scheme 一起钉死，系统切亮暗不生效。
-                .preferredColorScheme(model.pageThemeSource == "system"
-                    ? nil : (model.pageDark ? .dark : .light))
+                // 不钉窗口外观：页面主题按系统外观强制同步（注入脚本里做），
+                // 交通灯、玻璃按钮、毛玻璃材质都跟着系统亮暗走。
                 .background(WindowAccessor { model.adopt($0) })
         }
         .defaultSize(width: 1200, height: 840)
@@ -201,16 +199,6 @@ private struct VibrancyBackdrop: NSViewRepresentable {
     }
 }
 
-extension RootView {
-    /// 页面画布的底色，取前端 boot 用的那两个值（#151517 / #fff）：
-    /// 启动中的几秒没有网页，用系统色的话会和页面主题对不上，亮暗闪一下。
-    static func pageCanvas(dark: Bool) -> Color {
-        dark
-            ? Color(red: 21 / 255.0, green: 21 / 255.0, blue: 23 / 255.0)
-            : Color.white
-    }
-}
-
 struct RootView: View {    @ObservedObject var model: ShellModel
 
     var body: some View {
@@ -243,7 +231,8 @@ struct RootView: View {    @ObservedObject var model: ShellModel
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 启动/失败界面仍是实色底；进入页面后背景交给底下的原生材质透。
-        .background(model.isReady ? Color.clear : Self.pageCanvas(dark: model.pageDark))
+        // 启动页用系统内容色，跟着 macOS 外观走。
+        .background(model.isReady ? Color.clear : Color(nsColor: .textBackgroundColor))
     }
 }
 
