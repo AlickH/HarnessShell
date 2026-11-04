@@ -27,11 +27,13 @@ struct WebPane: NSViewRepresentable {
         // Electron 桌面端默认也不开，行为一致。
         webView.allowsBackForwardNavigationGestures = false
         webView.allowsMagnification = false
-        webView.underPageBackgroundColor = .windowBackgroundColor
+        // 透明 WebView：侧栏那一片由原生 NSVisualEffectView 透上来（见 App.swift），
+        // 页面自己负责把 frame/侧栏画成透明。
+        webView.underPageBackgroundColor = .clear
         // 暗色模式启动时，页面加载前 WKWebView 会先露出它自己的默认白底，
         // 造成「白闪」。给它的 layer 一个跟随外观的底色，把这一闪压成暗色。
         webView.wantsLayer = true
-        webView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        webView.layer?.backgroundColor = NSColor.clear.cgColor
         Self.syncWebViewAppearance(webView)
         // 关闭 WKWebView 自身的背景绘制（私有 KVC）：它默认在页面内容提交前
         // 画一块白底，是白闪的元凶。关掉后由上层 layer 底色兜底。
@@ -68,13 +70,11 @@ struct WebPane: NSViewRepresentable {
         }
     }
 
-    /// 让 WKWebView 的底层背景跟随系统外观：暗色模式用暗底、亮色用亮底，
-    /// 避免暗色下启动时页面加载前先闪一下白色空白。
+    /// WKWebView 的两层"兜底底色"都要清空：页面加载前露出的应该是窗口里的原生材质，
+    /// 而不是白闪或一块纯色（以前为了压白闪铺了实色，现在实色会挡住毛玻璃）。
     private static func syncWebViewAppearance(_ webView: WKWebView) {
-        let dark = webView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let bg = dark ? NSColor(calibratedWhite: 0.10, alpha: 1) : NSColor.white
-        webView.layer?.backgroundColor = bg.cgColor
-        webView.underPageBackgroundColor = bg
+        webView.layer?.backgroundColor = NSColor.clear.cgColor
+        webView.underPageBackgroundColor = .clear
     }
 
     /// 清空 WKWebView 的 cookie 后再加载带令牌的地址。
@@ -135,6 +135,21 @@ struct WebPane: NSViewRepresentable {
             return max;
           }
 
+          // 页面主题单独上报：原生毛玻璃材质跟着它走。不能等侧栏 DOM——
+          // React mount 之前那几秒窗口已经在显示了，材质得先是对的颜色。
+          var lastThemeSent = '';
+          function reportTheme() {
+            var body = document.body;
+            if (!body) { return; }
+            var dark = body.hasAttribute('data-ds-dark-theme');
+            var key = dark ? '1' : '0';
+            if (key === lastThemeSent) { return; }
+            lastThemeSent = key;
+            try {
+              window.webkit.messageHandlers.whaless.postMessage({ dark: dark });
+            } catch (e) {}
+          }
+
           // 侧栏状态上报：原生按钮的位置和显隐都靠它。
           // 折叠动画 0.3s 期间会连发一串，有 lastSent 去重，静止时一条也不发。
           var lastSent = '';
@@ -145,14 +160,18 @@ struct WebPane: NSViewRepresentable {
             var collapsed = !!document.querySelector('[data-sidebar-collapsed]');
             // 属性还没上来的首帧用宽度兜底（56px 窄条 = 折叠）。
             if (!collapsed && width < 200) { collapsed = true; }
-            var key = width + ':' + (collapsed ? '1' : '0');
+            // 页面自己的主题（跟系统无关）：原生那层毛玻璃的材质要跟它走，
+            // 不跟系统走——否则系统亮色 + 页面暗色时侧栏会是一块亮的雾。
+            var dark = !!(document.body
+              && document.body.hasAttribute('data-ds-dark-theme'));
+            var key = width + ':' + (collapsed ? '1' : '0') + ':' + (dark ? '1' : '0');
             if (key === lastSent) { return; }
             lastSent = key;
             if (window.webkit && window.webkit.messageHandlers
                 && window.webkit.messageHandlers.whaless) {
               try {
                 window.webkit.messageHandlers.whaless
-                  .postMessage({ width: width, collapsed: collapsed });
+                  .postMessage({ width: width, collapsed: collapsed, dark: dark });
               } catch (e) {}
             }
           }
@@ -168,6 +187,29 @@ struct WebPane: NSViewRepresentable {
               '[class*="sidebar"] [class*="toggle"]{visibility:hidden !important}',
               // 无标题栏下，侧栏内容要往下让出交通灯 + 两个液态玻璃按钮那一行。
               '[class*="sidebarCol"]{padding-top:50px !important;box-sizing:border-box !important;}',
+              // ---- 侧栏毛玻璃：页面只负责"别把材质盖住" ----
+              // 原生那层 NSVisualEffectView 在 App.swift（窗口透明 + behindWindow），
+              // 等价于官方桌面端 Electron 的 `vibrancy: "sidebar"`。这里把要透的链路
+              // 全打成透明，并给侧栏铺一层和桌面端 darwin 模式同款的薄 tint：
+              // 整列（含顶部 50px 让位区）有色，内容根不再画第二层底。
+              '[class*="frame"]{background:transparent !important}',
+              // tint 的取值照抄上游 darwin 模式：亮色 40%、暗色 50%，
+              // 上下各带一点冷色渐变，玻璃才不是一层平灰。
+              '[class*="sidebarCol"]{background:linear-gradient(to bottom,'
+                + '#7a9bf01a,#7a9bf000 35%,#8f89b800 68%,#8f89b817),'
+                + 'color-mix(in srgb,var(--dsw-specific-sidebar-fill) 40%,transparent)'
+                + ' !important}',
+              'body[data-ds-dark-theme] [class*="sidebarCol"]{'
+                + 'background:linear-gradient(to bottom,'
+                + '#7a9bf014,#7a9bf000 35%,#8f89b800 68%,#8f89b812),'
+                + 'color-mix(in srgb,var(--dsw-specific-sidebar-fill) 50%,transparent)'
+                + ' !important}',
+              '[class*="sidebarCol"] > * > *{background:transparent !important}',
+              // 其余区域保持实色：右侧栏在 web 模式下自己不带底，不补的话打开时会透。
+              '[class*="rightbarCol"]{background:var(--dsw-alias-bg-base) !important}',
+              // 会话列表底部那条渐隐是"渐隐到侧栏实色底"的：侧栏改玻璃之后它
+              // 会变成一条盖住材质的实色条，直接去掉（列表本身滚动不受影响）。
+              '[class*="sidebarCol"] [class*="_fade"]{display:none !important}',
               // ---- 顶部让位：把桌面端 `[data-platform=darwin]` 那套等价补回来 ----
               // 上游 layout 里 darwin 模式会声明这两个变量（48px 标题栏 + 68px 浮层），
               // 页面标题（`pageHead` / `pageHeading`，28px + clearance）和设置遮罩都用它。
@@ -223,12 +265,6 @@ struct WebPane: NSViewRepresentable {
               '[class*="sidebarCol"] > * > *{'
                 + 'transition:transform var(--ds-transition-duration-slow,.3s) '
                 + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1))}',
-              // 动画期间列（grid 单元，原地不动）永远铺一层"这块区域正常的底色"。
-              // 有复制品时它被整块遮住（复制品底色同源），看不见；没有复制品的
-              // 降级路径下它就是唯一的底，顶部让位区不会露出 web 底色（黑）。
-              // 之前这里是 transparent —— 一旦快照没就位，顶部立刻黑一块。
-              '[data-whaless-anim] [class*="sidebarCol"]:not([data-whaless-ghost])'
-                + '{background:var(--whaless-sidebar-bg,inherit) !important}',
               // 折叠态：整块平移到窗口外（-100% = 展开宽度，永远对得上）。
               '[data-sidebar-collapsed] [class*="sidebarCol"]:not([data-whaless-ghost]) > * > *'
                 + '{transform:translateX(-100%)}',
@@ -278,11 +314,11 @@ struct WebPane: NSViewRepresentable {
               // 禁止页面内部滚动容器的 overscroll 弹性回弹，否则双指拖动会露白边。
               'html,body{overscroll-behavior:none !important;}',
               '*{overscroll-behavior:none !important;}',
-              // 暗色模式下，React 渲染出深色主题前，html/body 的默认白底会闪一下。
-              '@media (prefers-color-scheme: dark){',
-              '  html{background:#141414 !important;color-scheme:dark;}',
-              '  body{background:#141414 !important;}',
-              '}'
+              // 页面自底向上都得透，原生毛玻璃才看得见。暗色模式下原本这里铺
+              // #141414 防白闪；现在不放底色反而不会闪（窗口/WebView 层也是透明的，
+              // 露出来的是材质）。color-scheme 留着让表单控件跟随暗色。
+              'html,body{background:transparent !important}',
+              '@media (prefers-color-scheme: dark){html{color-scheme:dark}}'
             ].join('\\n');
             (document.head || document.documentElement).appendChild(style);
           }
@@ -328,37 +364,6 @@ struct WebPane: NSViewRepresentable {
           // 上一拍读到的列宽，用来判断"是否已经稳定"。
           var lastSampledW = 0;
 
-          // 侧栏顶部那块（给交通灯让位的 50px）在正常态显示的是什么颜色。
-          // 静止展开时采样一次存下来，克隆快照时直接拿它铺底 —— 只从"面板本体"
-          // 取色是不行的：折叠态列里没有面板节点，取到空值，顶部就会露出 web 底色。
-          var sidebarBg = '';
-
-          // 往上找第一个"真正不透明"的背景色（半透明的叠上去还是会露底，跳过）。
-          function solidBg(el) {
-            var cur = el;
-            while (cur && cur !== document.documentElement) {
-              var c = getComputedStyle(cur).backgroundColor;
-              if (c && c !== 'transparent') {
-                var m = c.match(/^rgba?[(](.*)[)]$/);
-                if (m) {
-                  var p = m[1].split(',');
-                  var a = p.length > 3 ? parseFloat(p[3]) : 1;
-                  if (a > 0.9) { return c; }
-                }
-              }
-              cur = cur.parentElement;
-            }
-            return '';
-          }
-
-          // 一列在"顶部让位区"实际显示的颜色：列自己不透明就用列的，否则往上找。
-          function topBgOf(col) {
-            var mid = col && col.firstElementChild;
-            var pan = mid && mid.firstElementChild;
-            return solidBg(col) || (pan ? solidBg(pan) : '')
-              || (document.body ? solidBg(document.body) : '');
-          }
-
           // 快照是某一刻"拍"下来的，主题一换它就过时了（深色快照滑进浅色界面）。
           // 记下拍摄时的主题指纹，复用前对一下，对不上就丢掉、退回真身滑入。
           var savedTheme = '';
@@ -378,6 +383,7 @@ struct WebPane: NSViewRepresentable {
 
           function apply() {
             injectStyle();
+            reportTheme();
             var list = sidebars();
             if (!list.length) { return; }
             // 动画期间一帧 JS 都不跑：宽度由原生那边用同一条曲线自己补间（见
@@ -397,13 +403,6 @@ struct WebPane: NSViewRepresentable {
                   expandedWidth = Math.round(w);
                   document.documentElement.style.setProperty(
                     '--whaless-sidebar-w', expandedWidth + 'px');
-                  // 顺手把这块区域的底色记下来（只在真正展开、静止时采）。
-                  var tb = topBgOf(el);
-                  if (tb) {
-                    sidebarBg = tb;
-                    document.documentElement.style.setProperty(
-                      '--whaless-sidebar-bg', tb);
-                  }
                 }
               }
               lastSampledW = w;
@@ -584,17 +583,12 @@ struct WebPane: NSViewRepresentable {
             var ghost = col.cloneNode(true);
             ghost.setAttribute('data-whaless-ghost', '');
             rewriteGhostIds(ghost);
-            // 面板本体从 y=50 起才有底色（上面是给交通灯让位的 padding），
-            // 复制品要整块（含那 50px）都有底色，否则滑入时顶部是黑的。
-            // 取色顺序：面板 → 这块区域的实际底色（静止时采的）→ 逐步往上找。
-            var mid2 = col.firstElementChild;
-            var pan2 = mid2 && mid2.firstElementChild;
-            var bg = (pan2 ? solidBg(pan2) : '') || sidebarBg || topBgOf(col);
-            var paint = bg ? 'background:' + bg + ' !important;' : '';
+            // 底色不在这里画：侧栏要透出原生毛玻璃，克隆体自带和真身同一条
+            // CSS（列上的 tint + 内容根透明），跟着滑的就是同一张"半透明"的图。
             // 影子 frame 负责"长在展开态里"，复制品自己只负责尺寸和位移。
             ghost.style.cssText = 'position:relative;left:0;top:0;width:100%;height:100%;'
               + 'margin:0;overflow:hidden;box-sizing:border-box;'
-              + 'visibility:visible !important;' + paint;
+              + 'visibility:visible !important;';
             var shell = ghostShell(frame);
             shell.appendChild(ghost);
             placeGhost(shell, rect);
@@ -759,7 +753,14 @@ struct WebPane: NSViewRepresentable {
           };
 
           apply();
-          document.addEventListener('DOMContentLoaded', apply);
+          document.addEventListener('DOMContentLoaded', function () {
+            apply();
+            // 主题是挂在 body 上的属性：切主题要立刻让原生材质跟上。
+            new MutationObserver(reportTheme).observe(document.body, {
+              attributes: true, attributeFilter: ['data-ds-dark-theme']
+            });
+            reportTheme();
+          });
           window.addEventListener('load', apply);
           new MutationObserver(schedule)
             .observe(document.documentElement, { childList: true, subtree: true });
@@ -792,6 +793,9 @@ struct WebPane: NSViewRepresentable {
             if let log = body["log"] as? String {
                 ShellLog.write(log)
                 return
+            }
+            if let dark = (body["dark"] as? NSNumber)?.boolValue {
+                model.reportTheme(dark: dark)
             }
             guard let width = (body["width"] as? NSNumber)?.doubleValue,
                   width > 0 else { return }
@@ -888,6 +892,7 @@ struct WebPane: NSViewRepresentable {
                               firstTop = Math.round(r.top) + '/' + Math.round(r.height);
                             }
                           }
+                          // 毛玻璃链路：这几层的背景只要有一层不透明，材质就透不上来。
                           return 'side=' + w(side) + ' center=' + w(m)
                             + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0')
                             + ' pad=' + pad + ' quietTop=' + firstTop

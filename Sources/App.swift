@@ -19,6 +19,7 @@ struct WhalessApp: App {
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
                 .ignoresSafeArea()
+                .preferredColorScheme(model.pageDark ? .dark : .light)
                 .background(WindowAccessor { model.adopt($0) })
         }
         .defaultSize(width: 1200, height: 840)
@@ -179,14 +180,48 @@ private struct TopButtons: View {
     }
 }
 
+/// 侧栏毛玻璃的底：窗口透明后，这层把窗口背后的东西模糊进来。
+/// 材质外观跟页面主题走（`pageDark`，由注入脚本上报），不跟系统走。
+private struct VibrancyBackdrop: NSViewRepresentable {
+    let dark: Bool
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    }
+}
+
+extension RootView {
+    /// 页面画布的底色，取前端 boot 用的那两个值（#151517 / #fff）：
+    /// 启动中的几秒没有网页，用系统色的话会和页面主题对不上，亮暗闪一下。
+    static func pageCanvas(dark: Bool) -> Color {
+        dark
+            ? Color(red: 21 / 255.0, green: 21 / 255.0, blue: 23 / 255.0)
+            : Color.white
+    }
+}
+
 struct RootView: View {    @ObservedObject var model: ShellModel
 
     var body: some View {
         Group {
             switch model.phase {
             case .ready(let url):
-                WebPane(url: url, model: model)
-                    .ignoresSafeArea()
+                // 侧栏毛玻璃：原生材质垫在 WebPane 底下，页面把 frame/侧栏画成透明
+                // （见 WebPane 注入的 CSS），主栏仍是实色 —— 只有侧栏区域能透出这层，
+                // 等价于官方桌面端的 `vibrancy: "sidebar"`。
+                ZStack {
+                    VibrancyBackdrop(dark: model.pageDark)
+                    WebPane(url: url, model: model)
+                }
+                .ignoresSafeArea()
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",
                            detail: detail,
@@ -204,9 +239,8 @@ struct RootView: View {    @ObservedObject var model: ShellModel
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 让整棵视图（含启动中的 StatusView）背景跟随系统外观，
-        // 暗色模式下窗口一出现就是暗底，不露白。
-        .background(Color(nsColor: .windowBackgroundColor))
+        // 启动/失败界面仍是实色底；进入页面后背景交给底下的原生材质透。
+        .background(model.isReady ? Color.clear : Self.pageCanvas(dark: model.pageDark))
     }
 }
 

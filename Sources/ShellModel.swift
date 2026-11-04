@@ -29,6 +29,11 @@ final class ShellModel: ObservableObject {
     /// 首次上报 = 页面真的渲染出来了。在那之前顶部按钮整套不显示。
     @Published private(set) var webContentReady = false
 
+    /// 页面当前的深色/浅色（跟着页面主题，不跟系统）。原生毛玻璃材质和启动界面都按它
+    /// 取样式，否则系统亮色 + 页面暗色时：侧栏是一块亮的雾、启动时还白闪一下。
+    /// 初值取上一次记住的主题 —— 内核起来那几秒（页面还没上报）也不至于用错颜色。
+    @Published private(set) var pageDark: Bool
+
     /// 折叠/展开动画窗口。这 0.3s 里 web 那边一帧 JS 都不跑，按钮位置由这里自己补间：
     /// 玻璃效果（GlassEffectContainer）每帧重渲染一次很贵，逐帧喂宽度会把整段动画
     /// 拖到 40fps —— 这正是左侧栏"不如右侧栏顺"的主因。改用一条和 CSS 完全相同的
@@ -36,6 +41,21 @@ final class ShellModel: ObservableObject {
     private var toggleAnimUntil: Date?
     /// 最近一次展开态的宽度（折叠时用它当展开目标）。
     private var lastExpandedWidth: CGFloat = 280
+
+    private static let pageDarkKey = "pageDark"
+
+    init() {
+        let stored = UserDefaults.standard.object(forKey: Self.pageDarkKey) as? Bool
+        pageDark = stored
+            ?? (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+    }
+
+    /// web 端已经把 theme 单独上报过来了（不依赖侧栏渲染，页面一挂就报）。
+    func reportTheme(dark: Bool) {
+        guard pageDark != dark else { return }
+        pageDark = dark
+        UserDefaults.standard.set(dark, forKey: Self.pageDarkKey)
+    }
 
     func beginToggle() {
         let target: CGFloat = sidebarCollapsed ? lastExpandedWidth : 56

@@ -26,6 +26,11 @@ final class WindowKeeper: NSObject, NSWindowDelegate {
         window.isRestorable = false
         // 无标题栏由 .windowStyle(.hiddenTitleBar) 处理，这里不再重复改 styleMask。
 
+        // 侧栏毛玻璃：窗口自己必须透明，`behindWindow` 的 NSVisualEffectView
+        // 才有东西可透。页面里主栏仍是实色，所以窗口边缘不会透出桌面。
+        window.isOpaque = false
+        window.backgroundColor = .clear
+
         nudgeTrafficLights(in: window)
         // 窗口尺寸一变，titlebar 会重新布局，按钮又回到默认位置，所以要再挪一次。
         for name in [NSWindow.didResizeNotification, NSWindow.didBecomeKeyNotification] {
