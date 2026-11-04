@@ -489,6 +489,14 @@ struct WebPane: NSViewRepresentable {
               // 落位后原生胶囊接上时形状一致，不会"从圆角矩形跳到胶囊"。
               '[class*="sidebarCol"] [class*="newSession"]'
                 + '{border-radius:999px !important}',
+              // 右侧栏引导区那几张大按钮：半透明底 + 背景模糊，做出玻璃卡片的感觉
+              // （面板本身仍是实底，所以是"透玻璃质感"而不是真透桌面）。
+              '[data-sidebar-right-guide-entry],'
+                + '[data-sidebar-right-guide] [class*="entry"]'
+                + '{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent)'
+                + ' !important;'
+                + ' -webkit-backdrop-filter:blur(20px) saturate(1.6);'
+                + ' backdrop-filter:blur(20px) saturate(1.6)}',
               // 会话页右上角两个控件改由原生接管（开在应用里 / 更多操作）。
               'button[aria-label="更多操作"],[data-open-target]'
                 + '{visibility:hidden !important}',
