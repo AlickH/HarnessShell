@@ -197,6 +197,86 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    /// 会话页右上角两个控件（开在应用里 / 更多操作）的位置与菜单项。
+    /// 网页那两处控件被隐藏，原生画成玻璃按钮、菜单用系统 NSMenu 展示。
+    @Published private(set) var sessionMoreRect: CGRect?
+    @Published private(set) var sessionTargetRect: CGRect?
+    @Published private(set) var sessionSplit = false
+    /// 内容列的右边缘（点）：这两颗按钮挂内容区层级，不挂窗口右边。
+    @Published private(set) var sessionContentRight: CGFloat?
+    @Published private(set) var sessionMenuItems: [String] = []
+    @Published private(set) var openInAppItems: [String] = []
+
+    func reportSessionHeader(_ raw: [String: Any]) {
+        func rect(_ key: String) -> CGRect? {
+            guard let box = raw[key] as? [NSNumber], box.count == 4 else { return nil }
+            return CGRect(x: CGFloat(truncating: box[0]),
+                          y: CGFloat(truncating: box[1]),
+                          width: CGFloat(truncating: box[2]),
+                          height: CGFloat(truncating: box[3]))
+        }
+        let more = rect("more")
+        let target = rect("target")
+        let split = (raw["split"] as? NSNumber)?.boolValue ?? false
+        sessionContentRight = (raw["right"] as? NSNumber).map { CGFloat(truncating: $0) }
+        if more != sessionMoreRect || target != sessionTargetRect || split != sessionSplit {
+            sessionMoreRect = more
+            sessionTargetRect = target
+            sessionSplit = split
+        }
+    }
+
+    func reportMenuLabels(_ raw: [String: Any]) {
+        sessionMenuItems = (raw["more"] as? [String]) ?? []
+        openInAppItems = (raw["apps"] as? [String]) ?? []
+    }
+
+    /// 用系统 NSMenu 展示这两个按钮的菜单（菜单项来自网页，选择后回点网页条目）。
+    func showSystemMenu(_ kind: String) {
+        let items = kind == "apps" ? openInAppItems : sessionMenuItems
+        guard !items.isEmpty,
+              let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible),
+              let contentView = window.contentView else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (index, title) in items.enumerated() {
+            let item = NSMenuItem(title: title,
+                                  action: #selector(ShellModel.systemMenuPicked(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            item.representedObject = kind
+            menu.addItem(item)
+        }
+        let rect = kind == "apps" ? sessionTargetRect : sessionMoreRect
+        guard let rect else { return }
+        let x = rect.midX
+        let y = rect.midY
+        // 异步弹出：同步 popUp 会被这次点击的 mouseUp 立刻关掉。
+        DispatchQueue.main.async {
+            menu.popUp(positioning: nil,
+                       at: NSPoint(x: x, y: contentView.bounds.height - y),
+                       in: contentView)
+        }
+    }
+
+    @objc private func systemMenuPicked(_ sender: NSMenuItem) {
+        pickMenu(sender.representedObject as? String ?? "more", sender.tag)
+    }
+
+    /// 选中系统菜单项后回点网页对应条目。
+    func pickMenu(_ kind: String, _ index: Int) {
+        webView?.evaluateJavaScript(
+            "window.__whalessPickMenu && window.__whalessPickMenu('" + kind
+            + "', " + String(index) + ")")
+    }
+
+    /// 「开在应用里」的主按钮：直接打开默认目标。
+    func openInDefaultApp() {
+        webView?.evaluateJavaScript(
+            "window.__whalessOpenTarget && window.__whalessOpenTarget()")
+    }
+
     /// 侧栏里「新会话」按钮的位置/高度（宽度按 sidebarWidth 实时算）。
     /// 网页那颗被隐藏，这里画成原生液态玻璃胶囊。
     @Published private(set) var newSessionTop: CGFloat?

@@ -214,6 +214,124 @@ struct WebPane: NSViewRepresentable {
             }
             return true;
           }
+          // 会话页右上角：开在应用里（split 控件）+ 更多操作（…）。
+          // 位置报给原生画玻璃按钮；它们的菜单项也由原生用系统菜单来展示，
+          // 这里只在后台"开一下菜单读 DOM、马上关掉"（探测期间弹出层被 CSS 藏住）。
+          var lastHeaderSent = '';
+          var menusProbed = false;
+
+          function sessionHeaderData() {
+            var more = document.querySelector('button[aria-label="更多操作"]');
+            var target = document.querySelector('[data-open-target]');
+            var center = document.querySelector('[class*="centerCol"]');
+            var point = function (el) {
+              if (!el) { return null; }
+              var r = el.getBoundingClientRect();
+              if (r.width <= 0 || r.height <= 0) { return null; }
+              return [Math.round(r.left), Math.round(r.top),
+                      Math.round(r.width), Math.round(r.height)];
+            };
+            return {
+              more: point(more),
+              target: point(target),
+              // 这两颗挂在"内容区"层级：右边缘跟着内容列走，不跟窗口右边走。
+              right: center
+                ? Math.round(center.getBoundingClientRect().right) : null,
+              split: !!(target
+                && target.querySelector('button[class*="chevron"]'))
+            };
+          }
+
+          // 打开网页菜单 → 等它渲染 → 读条目 → 再关掉。菜单弹出是异步渲染的，
+          // 所以每一步都用 setTimeout 串起来，不能同步读。
+          function probeMenus() {
+            if (menusProbed) { return; }
+            var more = document.querySelector('button[aria-label="更多操作"]');
+            var target = document.querySelector('[data-open-target]');
+            var chevron = target && target.querySelector('button[class*="chevron"]');
+            if (!more && !chevron) { return; }
+            menusProbed = true;
+            document.documentElement.classList.add('whaless-menu-probe');
+            var labels = { more: [], apps: [] };
+
+            function readItems() {
+              var items = document.querySelectorAll('[role="menu"] [role="menuitem"]');
+              var out = [];
+              for (var i = 0; i < items.length; i++) {
+                out.push(String(items[i].textContent).trim());
+              }
+              return out;
+            }
+
+            function finish() {
+              document.documentElement.classList.remove('whaless-menu-probe');
+              try {
+                window.webkit.messageHandlers.whaless
+                  .postMessage({ menuLabels: labels });
+              } catch (e) {}
+            }
+
+            var queue = [];
+            if (more) {
+              queue.push(function (next) {
+                more.click();
+                setTimeout(function () {
+                  labels.more = readItems();
+                  more.click();
+                  setTimeout(next, 80);
+                }, 160);
+              });
+            }
+            if (chevron) {
+              queue.push(function (next) {
+                chevron.click();
+                setTimeout(function () {
+                  labels.apps = readItems();
+                  chevron.click();
+                  setTimeout(next, 80);
+                }, 160);
+              });
+            }
+            var run = function (index) {
+              if (index >= queue.length) { setTimeout(finish, 80); return; }
+              queue[index](function () { run(index + 1); });
+            };
+            run(0);
+          }
+
+          function reportSessionHeader() {
+            var data = sessionHeaderData();
+            var key = JSON.stringify(data);
+            if (key !== lastHeaderSent) {
+              lastHeaderSent = key;
+              try {
+                window.webkit.messageHandlers.whaless
+                  .postMessage({ sessionHeader: data });
+              } catch (e) {}
+            }
+            probeMenus();
+          }
+
+          // 原生选中系统菜单项后，回到网页里点同一个条目。
+          window.__whalessPickMenu = function (kind, index) {
+            var trigger = kind === 'apps'
+              ? document.querySelector('[data-open-target] button[class*="chevron"]')
+              : document.querySelector('button[aria-label="更多操作"]');
+            if (!trigger) { return; }
+            trigger.click();
+            setTimeout(function () {
+              var items = document.querySelectorAll(
+                '[role="menu"] [role="menuitem"]');
+              if (items[index]) { items[index].click(); }
+            }, 100);
+          };
+
+          // 打开"开在应用里"的默认目标（主按钮）
+          window.__whalessOpenTarget = function () {
+            var button = document.querySelector('[data-open-target] button[class*="main"]');
+            if (button) { button.click(); }
+          };
+
           // 「新会话」胶囊：只要位置/尺寸，宽度在原生那边按 sidebarWidth 实时算。
           var lastNewSessionSent = '';
           function reportNewSession() {
@@ -310,6 +428,12 @@ struct WebPane: NSViewRepresentable {
               // 落位后原生胶囊接上时形状一致，不会"从圆角矩形跳到胶囊"。
               '[class*="sidebarCol"] [class*="newSession"]'
                 + '{border-radius:999px !important}',
+              // 会话页右上角两个控件改由原生接管（开在应用里 / 更多操作）。
+              'button[aria-label="更多操作"],[data-open-target]'
+                + '{visibility:hidden !important}',
+              // 探测菜单项时把网页弹出层藏住：只读 DOM，不让人看见它闪一下。
+              'html.whaless-menu-probe [role="menu"]'
+                + '{visibility:hidden !important}',
               // 侧栏里的「新会话」由原生玻璃胶囊接管（位置/宽度跟侧栏走）。
               // 排除复制品：收放动画时快照里要保持原样。
               '[class*="sidebarCol"]:not([data-whaless-ghost]) [class*="newSession"]'
@@ -594,6 +718,7 @@ struct WebPane: NSViewRepresentable {
             report(list);
             reportRightButtons();
             reportNewSession();
+            reportSessionHeader();
             watch(list);
             for (var k = 0; k < list.length; k++) {
               var el = list[k];
@@ -1032,6 +1157,12 @@ struct WebPane: NSViewRepresentable {
             }
             if let newSession = body["newSession"] as? [NSNumber] {
                 model.reportNewSession(newSession)
+            }
+            if let header = body["sessionHeader"] as? [String: Any] {
+                model.reportSessionHeader(header)
+            }
+            if let labels = body["menuLabels"] as? [String: Any] {
+                model.reportMenuLabels(labels)
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
                 model.reportTheme(dark: dark)

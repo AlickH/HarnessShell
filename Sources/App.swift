@@ -22,6 +22,9 @@ struct WhalessApp: App {
                 .overlay(alignment: .topTrailing) {
                     RightButtonsRow(model: model)
                 }
+                .overlay(alignment: .topLeading) {
+                    SessionHeaderButtons(model: model)
+                }
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
                 .ignoresSafeArea()
@@ -216,6 +219,45 @@ private struct VibrancyBackdrop: NSViewRepresentable {
     }
 }
 
+/// 会话页内容区右上角的两颗（开在应用里 / 更多操作）：
+/// 挂在**内容区**层级 —— 右边对齐内容列的右边缘，右侧栏打开时跟着内容列一起左移。
+/// 和右上角那排同样 36pt、间距 8；两颗都是菜单按钮，点了弹系统菜单。
+private struct SessionHeaderButtons: View {
+    @ObservedObject var model: ShellModel
+
+    private let size: CGFloat = 36
+    private let spacing: CGFloat = 8
+
+    private func button(symbol: String, help: String, menu: String) -> some View {
+        Button {
+            model.showSystemMenu(menu)
+        } label: {
+            Image(systemName: symbol)
+                .frame(width: size, height: size)
+                .font(.system(size: 16, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .help(help)
+    }
+
+    var body: some View {
+        if let right = model.sessionContentRight,
+           model.sessionMoreRect != nil || model.sessionTargetRect != nil {
+            HStack(spacing: spacing) {
+                if model.sessionTargetRect != nil {
+                    button(symbol: "arrow.up.forward.app",
+                           help: "在应用中打开", menu: "apps")
+                }
+                if model.sessionMoreRect != nil {
+                    button(symbol: "ellipsis", help: "更多操作", menu: "more")
+                }
+            }
+            .offset(x: right - 12 - size * 2 - spacing, y: 12)
+        }
+    }
+}
+
 /// 侧栏顶部的「新会话」：原生液态玻璃胶囊，盖在网页那颗（已隐藏）的位置上。
 /// 宽度跟着侧栏宽度实时变，收放动画期间交给快照显示，自己先退场。
 private struct NewSessionCapsule: View {
@@ -251,9 +293,10 @@ private struct RightButtonsRow: View {
     @ObservedObject var model: ShellModel
 
     private func chromeButton(_ id: String, symbol: String, help: String,
-                              enabled: Bool) -> some View {
+                              enabled: Bool,
+                              action: (() -> Void)? = nil) -> some View {
         Button {
-            model.clickPageButton(id)
+            if let action { action() } else { model.clickPageButton(id) }
         } label: {
             Image(systemName: symbol)
                 .frame(width: 36, height: 36)
