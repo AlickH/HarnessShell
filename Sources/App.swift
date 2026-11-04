@@ -142,7 +142,8 @@ private struct TopButtons: View {
     private var leading: CGFloat { max(92, model.sidebarWidth - 40) }
 
     var body: some View {
-        if model.webContentReady {
+        // 拖分隔线时先退场：玻璃每帧重绘太贵，跟手交给系统分隔线本身。
+        if model.webContentReady && !model.sidebarDragging {
             GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
                     Button {
