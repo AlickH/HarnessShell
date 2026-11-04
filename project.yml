@@ -29,8 +29,12 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Info.plist
+        # 用 Developer ID 而不是 ad-hoc：ad-hoc 的 designated requirement 就是 cdhash，
+        # 每次重编译都变，TCC（比如「访问文稿文件夹」）就每次都重新问一遍。
+        # 固定签名身份后授权能一直沿用；也顺带具备分发的条件（公证还需要 hardened runtime）。
         CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        DEVELOPMENT_TEAM: KLU8GF65GP
         CODE_SIGNING_REQUIRED: YES
-        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_HARDENED_RUNTIME: YES
         COMBINE_HIDPI_IMAGES: YES
