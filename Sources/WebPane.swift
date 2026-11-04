@@ -306,6 +306,10 @@ struct WebPane: NSViewRepresentable {
               '[class*="sidebar"] [class*="toggle"]{visibility:hidden !important}',
               // 右侧栏的三个按钮改由原生液态玻璃圆钮接管（展开 / 全屏 / 收起）。
               // 同样用 visibility：元素还在 DOM 里，原生按钮 .click() 调同一个事件。
+              // 网页那颗「新会话」也画成胶囊形：收放动画里快照显示的就是它，
+              // 落位后原生胶囊接上时形状一致，不会"从圆角矩形跳到胶囊"。
+              '[class*="sidebarCol"] [class*="newSession"]'
+                + '{border-radius:999px !important}',
               // 侧栏里的「新会话」由原生玻璃胶囊接管（位置/宽度跟侧栏走）。
               // 排除复制品：收放动画时快照里要保持原样。
               '[class*="sidebarCol"]:not([data-whaless-ghost]) [class*="newSession"]'

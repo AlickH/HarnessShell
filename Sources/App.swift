@@ -143,27 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// **跟着折叠钮一起边滑边现**，而不是在终点原地弹出。
 ///
 /// 首次上报到来之前整套按钮不显示——页面还没渲染时顶上飘两个玻璃圆很突兀。
-/// 扁平胶囊底：形状和液态玻璃那颗一样，但只是半透明填充 + 一条发丝描边。
-/// 侧栏收放时按钮每帧都在动，扁平绘制随便重绘都不会出现"玻璃材质掉落"的观感。
-private struct FlatPill: ViewModifier {
-    @Environment(\.colorScheme) private var scheme
-
-    func body(content: Content) -> some View {
-        content
-            .background {
-                Capsule().fill(scheme == .dark
-                    ? Color.white.opacity(0.12)
-                    : Color.black.opacity(0.07))
-            }
-            .overlay {
-                Capsule().strokeBorder(
-                    scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06),
-                    lineWidth: 0.5)
-            }
-            .contentShape(Capsule())
-    }
-}
-
 private struct TopButtons: View {
     @ObservedObject var model: ShellModel
 
@@ -171,7 +150,8 @@ private struct TopButtons: View {
 
     var body: some View {
         if model.webContentReady {
-            HStack(spacing: 8) {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
                     Button {
                         model.toggleSidebar()
                     } label: {
@@ -180,7 +160,7 @@ private struct TopButtons: View {
                             .font(.system(size: 16, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    .modifier(FlatPill())
+                    .glassEffect(.regular.interactive(), in: Circle())
                     .help("收起 / 展开侧边栏")
 
                     // 用 `if` 而不是 `.opacity`：玻璃由 GlassEffectContainer 统一渲染，
@@ -194,10 +174,11 @@ private struct TopButtons: View {
                                 .font(.system(size: 16, weight: .medium))
                         }
                         .buttonStyle(.plain)
-                        .modifier(FlatPill())
+                        .glassEffect(.regular.interactive(), in: Circle())
                         .help("新会话")
                         .transition(.scale(scale: 0.7).combined(with: .opacity))
                     }
+                }
             }
             .padding(.top, 12)
             .padding(.leading, leading)
@@ -249,15 +230,15 @@ private struct NewSessionCapsule: View {
                 model.clickPageButton("newSession")
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .medium))
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 16, weight: .medium))
                     Text("新会话")
                         .font(.system(size: 14, weight: .medium))
                 }
                 .frame(width: width, height: model.newSessionHeight)
             }
             .buttonStyle(.plain)
-            .modifier(FlatPill())
+            .glassEffect(.regular.interactive(), in: Capsule())
             .offset(x: 12, y: top)
             .allowsHitTesting(true)
         }
@@ -279,7 +260,7 @@ private struct RightButtonsRow: View {
                 .font(.system(size: 16, weight: .medium))
         }
         .buttonStyle(.plain)
-        .modifier(FlatPill())
+        .glassEffect(.regular.interactive(), in: Circle())
         .help(help)
         .opacity(model.pageRightOpen ? (enabled ? 1 : 0.4) : 0)
         .disabled(!model.pageRightOpen || !enabled)
@@ -309,7 +290,7 @@ private struct RightButtonsRow: View {
                         .font(.system(size: 16, weight: .medium))
                 }
                 .buttonStyle(.plain)
-                .modifier(FlatPill())
+                .glassEffect(.regular.interactive(), in: Circle())
                 .help(model.pageRightOpen ? "收起右侧栏" : "展开右侧栏")
             }
             .padding(.top, 12)
