@@ -493,14 +493,6 @@ struct WebPane: NSViewRepresentable {
               'button[aria-label="更多操作"],[data-open-target]'
                 + '{visibility:hidden !important}',
               // 右侧栏全屏时，tab 条（含圆角包裹和 + 按钮）整体让开交通灯。
-              // 进出全屏时面板宽度是内联值一刀切（React 状态），而动画只走 transform，
-              // 于是"先按旧宽度滑、结束后才变 100vw"。这里给 width 也补同一条过渡，
-              // 让它在滑动过程中连续变宽，避免最后那一下跳变。
-              '[data-sidebar-right-panel="fullscreen"]{'
-                + 'transition:transform var(--ds-transition-duration-slow,.3s) '
-                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)),'
-                + 'width var(--ds-transition-duration-slow,.3s) '
-                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
               '[data-sidebar-right-panel="fullscreen"] [class*="tabStrip"]'
                 + '{padding-left:90px !important}',
               // 探测菜单项时把网页弹出层藏住：只读 DOM，不让人看见它闪一下。
