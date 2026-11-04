@@ -45,6 +45,7 @@ final class ShellModel: ObservableObject {
             case .success(let url):
                 self.phase = .ready(url)
             case .failure(let failure):
+                ShellLog.write("启动失败：\(failure.message)")
                 self.phase = .failed(failure.message)
             }
         }

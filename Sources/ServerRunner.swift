@@ -91,15 +91,14 @@ final class ServerRunner {
             ServerRunner.reapPreviousChild()
             guard let launch = ServerRunner.resolve() else {
                 self.fail("""
-                    没找到 dsh 命令。
+                    没有找到 npm 版内核（dsh）。
 
-                    任选一种：
-                    • npm i -g @deepseek-ai/dsh
-                    • 安装 DeepSeek Harness 桌面端
-                    • npx @deepseek-ai/dsh@0.2.1-rc.5 web
+                    点下面的「安装 npm 版内核」自动装，也可以自己在终端执行：
+                    npm i -g @deepseek-ai/dsh
                     """)
                 return
             }
+            ShellLog.write("内核: \(launch.executable.path)（\(launch.install.label)）")
             do {
                 try self.spawn(launch)
             } catch {
