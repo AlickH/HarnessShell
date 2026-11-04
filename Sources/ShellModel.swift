@@ -56,26 +56,6 @@ final class ShellModel: ObservableObject {
         guard pageDark != dark else { return }
         pageDark = dark
         UserDefaults.standard.set(dark, forKey: Self.pageDarkKey)
-        pushContentBackground()
-    }
-
-    /// 把 macOS 的"内容区底色"（NSColor.textBackgroundColor）推给页面：
-    /// 内容背景要求跟系统外观走、用系统色，而不是页面主题自己的亮暗值。
-    func pushContentBackground() {
-        guard let webView else { return }
-        var color = NSColor.textBackgroundColor
-        let appearance = NSAppearance(named: pageDark ? .darkAqua : .aqua)
-        appearance?.performAsCurrentDrawingAppearance {
-            color = NSColor.textBackgroundColor
-        }
-        guard let srgb = color.usingColorSpace(.sRGB) else { return }
-        let hex = String(
-            format: "#%02x%02x%02x",
-            Int(round(srgb.redComponent * 255)),
-            Int(round(srgb.greenComponent * 255)),
-            Int(round(srgb.blueComponent * 255)))
-        webView.evaluateJavaScript(
-            "window.__whalessContentBg && window.__whalessContentBg('" + hex + "')")
     }
 
     func beginToggle() {

@@ -163,16 +163,6 @@ struct WebPane: NSViewRepresentable {
               darkQuery.addListener(onChange);
             }
           }
-          // 原生推系统色过来（十六进制）：内容区底色 = macOS 系统色，跟系统外观走。
-          // 内容区很多内层容器都吃 `--dsw-alias-bg-base`，所以直接改这个主题 token；
-          // 同时留一份 --whaless-content-bg 给动画期间 frame 补底用。
-          window.__whalessContentBg = function (value) {
-            if (!value) { return; }
-            document.documentElement.style.setProperty('--whaless-content-bg', value);
-            if (document.body) {
-              document.body.style.setProperty('--dsw-alias-bg-base', value, 'important');
-            }
-          };
 
           // 页面主题单独上报：原生毛玻璃材质跟着它走。不能等侧栏 DOM——
           // React mount 之前那几秒窗口已经在显示了，材质得先是对的颜色。
@@ -365,8 +355,8 @@ struct WebPane: NSViewRepresentable {
               // 列宽跳变后主栏比窗口窄（展开态那一侧），滑动时尾边会露底；
               // 动画期间给 frame 铺一层和主栏同色的底盖住，收尾就撤。
               '[data-whaless-anim] [class*="frame"]{'
-                + 'background:var(--whaless-content-bg,var(--dsw-alias-bg-base))'
-                + ' !important;transition:none !important}',
+                + 'background:var(--dsw-alias-bg-base) !important;'
+                + 'transition:none !important}',
               // 标题让位跟着侧栏一起过渡：只在壳主动切换的那一下挂，窗口缩放不拖慢。
               '[data-whaless-anim] [class*="titleRow"],'
                 + '[data-whaless-anim] [class*="titleRow"] ~ [class*="tabs"]{'
@@ -1002,7 +992,6 @@ struct WebPane: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             provisionalRetries = 0
-            model.pushContentBackground()
             ShellLog.write("didFinish \(webView.url.map(ShellLog.redact) ?? "-")")
             // 白屏排查：把页面标题和首屏文字记下来，能立刻区分"没加载"和"加载了但渲染空"。
             for delay in [0.0, 6.0, 14.0] {
