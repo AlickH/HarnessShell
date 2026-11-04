@@ -467,25 +467,29 @@ struct RootView: View {    @ObservedObject var model: ShellModel
     }
 }
 
-/// Deepy 像素鲸鱼：从 dsh-claude-style 皮肤里抓回来的精灵表。
-/// 精灵表 1520×780，栅格化扫描得到 8 列：帧起点 x = 6/196/386/575/765/955/1146/1336，
-/// 帧区 y=7、帧宽 174、帧高 118。
+/// Deepy 像素鲸鱼：从 dsh-claude-style 皮肤里把 **17 个状态**的精灵表全部抓了回来
+/// （Resources/deepy/<state>.svg），每次启动随机挑一个状态播放。
+/// 精灵表布局一致：8 列（x = 6/196/386/…，步长≈190），帧区 y=7、帧宽 174、帧高 118。
 struct DeepySprite: View {
     var width: CGFloat = 90
 
+    @State private var state = ""
     @State private var frameIndex = 0
-    /// 精灵帧本身只有细微的呼吸/气泡变化，皮肤另外叠了 CSS 的悬浮/呼吸动画，
-    /// 这里用同样的思路补一层轻微的上下浮动 + 缩放，让它在启动页里"活"起来。
     @State private var bob = false
     private let timer = Timer.publish(every: 0.14, on: .main, in: .common).autoconnect()
 
+    private let states = [
+        "idle", "idle-look", "idle-spout", "thinking", "typing", "music",
+        "conducting", "building", "error", "happy", "notification",
+        "compacting", "sleeping", "waking", "poke-left", "poke-right", "tickle",
+    ]
     private let frameXs: [CGFloat] = [6, 196, 386, 575, 765, 955, 1146, 1336]
     private let frameY: CGFloat = 7
     private let frameW: CGFloat = 174
     private let frameH: CGFloat = 118
 
     var body: some View {
-        if let sheet = deepySheet() {
+        if let sheet = sheetImage() {
             let scale = width / frameW
             Image(nsImage: sheet)
                 .resizable()
@@ -500,12 +504,18 @@ struct DeepySprite: View {
                 .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true),
                            value: bob)
                 .onReceive(timer) { _ in frameIndex = (frameIndex + 1) % frameXs.count }
-                .onAppear { bob = true }
+                .onAppear {
+                    state = states.randomElement() ?? "idle"
+                    bob = true
+                }
         }
     }
 
-    private func deepySheet() -> NSImage? {
-        guard let url = Bundle.main.url(forResource: "deepy-sprite", withExtension: "svg") else {
+    private func sheetImage() -> NSImage? {
+        let name = state.isEmpty ? "idle" : state
+        guard let url = Bundle.main.url(forResource: name, withExtension: "svg",
+                                        subdirectory: "deepy") ??
+                Bundle.main.url(forResource: name, withExtension: "svg") else {
             return nil
         }
         return NSImage(contentsOf: url)
