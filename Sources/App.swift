@@ -459,7 +459,24 @@ struct RootView: View {    @ObservedObject var model: ShellModel
     }
 }
 
+/// 品牌 wordmark：SVG 里填的是 `var(--dsw-alias-label-primary)` 这类变量，
+/// 直接当图片加载变量不会解析 —— 读出来按当前外观替换成实际色值再加载。
+func brandWordmark(dark: Bool) -> NSImage? {
+    guard let url = Bundle.main.url(forResource: "welcome-brand", withExtension: "svg"),
+          var text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+    let primary = dark ? "#ffffff" : "#0f1115"
+    let inverted = dark ? "#0f1115" : "#ffffff"
+    text = text.replacingOccurrences(of: "var(--dsw-alias-label-primary-inverted)",
+                                     with: inverted)
+    text = text.replacingOccurrences(of: "var(--dsw-alias-label-primary)", with: primary)
+    let tmp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("whaless-brand-\(dark ? "dark" : "light").svg")
+    try? text.write(to: tmp, atomically: true, encoding: .utf8)
+    return NSImage(contentsOf: tmp)
+}
+
 struct StatusView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let detail: String
     let showsSpinner: Bool
@@ -481,14 +498,13 @@ struct StatusView: View {
     var body: some View {
         VStack(spacing: 18) {
             // 品牌 wordmark（从桌面端 welcome 窗口抽出来的同一份 SVG）。
-            if let url = Bundle.main.url(forResource: "welcome-brand", withExtension: "svg"),
-               let brand = NSImage(contentsOf: url) {
+            if let brand = brandWordmark(dark: colorScheme == .dark) {
                 Image(nsImage: brand)
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 236)
-                    .padding(.bottom, 4)
+                    .frame(width: 360)
+                    .padding(.bottom, 6)
             }
             if showsSpinner {
                 ProgressView()
@@ -533,5 +549,6 @@ struct StatusView: View {
             .padding(.top, 2)
         }
         .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
