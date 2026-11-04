@@ -164,6 +164,14 @@ struct WebPane: NSViewRepresentable {
             }
           }
 
+          // 原生推来的"系统内容底色"（NSColor.textBackgroundColor 按当前外观解析）。
+          // 这是真正的 macOS 系统色，不是主题里写死的亮/暗值：直接压到主题的
+          // base token 上，内容区所有吃这个 token 的容器就都跟系统色走。
+          window.__whalessContentBg = function (value) {
+            if (!value || !document.body) { return; }
+            document.body.style.setProperty('--dsw-alias-bg-base', value, 'important');
+          };
+
           // 页面主题单独上报：原生毛玻璃材质跟着它走。不能等侧栏 DOM——
           // React mount 之前那几秒窗口已经在显示了，材质得先是对的颜色。
           var lastThemeSent = '';
@@ -995,6 +1003,7 @@ struct WebPane: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             provisionalRetries = 0
+            model.pushSystemContentColor()
             ShellLog.write("didFinish \(webView.url.map(ShellLog.redact) ?? "-")")
             // 白屏排查：把页面标题和首屏文字记下来，能立刻区分"没加载"和"加载了但渲染空"。
             for delay in [0.0, 6.0, 14.0] {

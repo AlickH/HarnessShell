@@ -149,6 +149,26 @@ final class ShellModel: ObservableObject {
         self.webView = webView
     }
 
+    /// 把 macOS 的系统内容底色推给页面：`NSColor.textBackgroundColor` 按当前外观
+    /// 解析成 sRGB（暗色 #1E1E1E / 亮色 #FFFFFF），这是真正的系统色，
+    /// 不是壳或 Harness 主题里写死的亮/暗值。
+    func pushSystemContentColor() {
+        guard let webView else { return }
+        var color = NSColor.textBackgroundColor
+        webView.effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = NSColor.textBackgroundColor
+        }
+        guard let srgb = color.usingColorSpace(.sRGB) else { return }
+        let hex = String(
+            format: "#%02x%02x%02x",
+            Int(round(srgb.redComponent * 255)),
+            Int(round(srgb.greenComponent * 255)),
+            Int(round(srgb.blueComponent * 255)))
+        ShellLog.write("system content color: \(hex)")
+        webView.evaluateJavaScript(
+            "window.__whalessContentBg && window.__whalessContentBg('" + hex + "')")
+    }
+
     func reload() {
         webView?.reload()
     }

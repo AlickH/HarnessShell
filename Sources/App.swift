@@ -182,20 +182,31 @@ private struct TopButtons: View {
 }
 
 /// 侧栏毛玻璃的底：窗口透明后，这层把窗口背后的东西模糊进来。
-/// 材质外观跟页面主题走（`pageDark`，由注入脚本上报），不跟系统走。
+/// 材质外观不钉死，跟着窗口/系统外观走。
+private final class BackdropEffectView: NSVisualEffectView {
+    /// 外观一变就通知壳去把系统内容色重新推给页面（系统色是随外观解析的）。
+    var onAppearanceChange: (() -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()
+    }
+}
+
 private struct VibrancyBackdrop: NSViewRepresentable {
-    let dark: Bool
+    let onAppearanceChange: () -> Void
 
     func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+        let view = BackdropEffectView()
         view.material = .sidebar
         view.blendingMode = .behindWindow
         view.state = .active
+        view.onAppearanceChange = onAppearanceChange
         return view
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        (view as? BackdropEffectView)?.onAppearanceChange = onAppearanceChange
     }
 }
 
@@ -209,7 +220,9 @@ struct RootView: View {    @ObservedObject var model: ShellModel
                 // （见 WebPane 注入的 CSS），主栏仍是实色 —— 只有侧栏区域能透出这层，
                 // 等价于官方桌面端的 `vibrancy: "sidebar"`。
                 ZStack {
-                    VibrancyBackdrop(dark: model.pageDark)
+                    VibrancyBackdrop(onAppearanceChange: {
+                        model.pushSystemContentColor()
+                    })
                     WebPane(url: url, model: model)
                 }
                 .ignoresSafeArea()
