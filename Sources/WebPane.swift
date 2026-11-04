@@ -49,10 +49,17 @@ struct WebPane: NSViewRepresentable {
         let source = """
         (function () {
           var inset = \(Int(inset));
-          var styled = new WeakSet();
 
           function columns() {
             return document.querySelectorAll('[class*="sidebarCol"],[class*="centerCol"],[class*="rightbarCol"]');
+          }
+
+          // 不要用 WeakSet 记"加过没有"：React 重渲染会覆盖 inline style，
+          // 记过账的节点会被跳过，内距就悄悄丢了。按实际计算值判断才稳。
+          function ensure(node) {
+            if (getComputedStyle(node).paddingTop === inset + 'px') { return; }
+            node.style.setProperty('padding-top', inset + 'px', 'important');
+            node.style.setProperty('box-sizing', 'border-box', 'important');
           }
 
           var rootStyled = false;
@@ -68,7 +75,7 @@ struct WebPane: NSViewRepresentable {
           function apply() {
             var nodes = columns();
             if (!nodes.length) {
-              // 启动画面阶段还没有两栏，只能先退到底座上；等真界面出现要把它撤掉，
+              // 启动画面阶段还没有两栏，只能先退到底座上；真界面出现后要撤掉，
               // 否则两处内距叠加，内容会缩进两次。
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
@@ -78,20 +85,16 @@ struct WebPane: NSViewRepresentable {
               return;
             }
             clearRoot();
-            for (var i = 0; i < nodes.length; i++) {
-              var node = nodes[i];
-              if (styled.has(node)) { continue; }
-              node.style.setProperty('padding-top', inset + 'px', 'important');
-              node.style.setProperty('box-sizing', 'border-box', 'important');
-              styled.add(node);
-            }
+            for (var i = 0; i < nodes.length; i++) { ensure(nodes[i]); }
           }
 
           var scheduled = false;
           function schedule() {
             if (scheduled) { return; }
             scheduled = true;
-            requestAnimationFrame(function () { scheduled = false; apply(); });
+            // 用 setTimeout 而不是 requestAnimationFrame：窗口被隐藏（关窗后保活）时
+            // rAF 会被系统挂起，内距就再也补不上了。
+            setTimeout(function () { scheduled = false; apply(); }, 50);
           }
 
           apply();

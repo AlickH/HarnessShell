@@ -70,6 +70,27 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 
 拖拽上传、剪贴板不需要额外代码（HTML5 事件和 `navigator.clipboard` 原生可用）。
 
+## 关窗不退出
+
+关窗口只是把窗口藏起来，内核继续跑：
+
+- `applicationShouldTerminateAfterLastWindowClosed` 返回 `false`
+- `WindowKeeper` 拦 `windowShouldClose`，改成 `orderOut`
+- 点 Dock 图标、或菜单栏的「显示窗口」把窗口拿回来
+- 真正退出用 ⌘Q 或菜单栏「退出 Whaless」，那时才收子进程
+
+`WindowKeeper` 只实现 `windowShouldClose`，其余 delegate 方法通过 `forwardingTarget`
+转给 SwiftUI 原来的代理——直接顶掉它的话，窗口一隐藏 SwiftUI 就以为场景结束了，
+重新显示时会把整棵视图重建、网页重新加载。
+
+## 隐藏标题栏
+
+`.windowStyle(.hiddenTitleBar)` + `ignoresSafeArea`，再给页面的 `sidebarCol` /
+`centerCol` 加 28px 内距：背景覆盖 padding 盒，所以侧栏灰底和主区白底都能铺到红绿灯
+那一行，只有内容下移。顶部那 28pt 由一层透明的 `DragStrip` 负责拖动窗口。
+
+内距用 `setTimeout` 而不是 `requestAnimationFrame` 应用——窗口隐藏时 rAF 会被挂起。
+
 ## 已知限制
 
 - **没有通知**。WKWebView 不暴露 `Notification` API（Apple DTS 明确说 Web Push 在
@@ -78,6 +99,9 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 - **会话写锁**。壳自己起一个 harness，和桌面端共用 `$DSH_HOME`。同时打开时别两边
   都发起长任务。
 - **每次启动是新进程**，端口也变。这是 `--port 0` 的代价，换来的是永不冲突。
+- **隐藏标题栏依赖类名后缀**（`sidebarCol` / `centerCol`）。前端哪天改了名字，内距会
+  退回加到 `#root` 上——不会压住红绿灯，但顶部会露出 body 底色。日志里
+  `pad(col)=no-col` 就是信号。
 
 ## 孤儿进程
 
@@ -106,6 +130,8 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 | `Sources/ServerRunner.swift` | 进程、令牌解析、内核定位、孤儿回收 |
 | `Sources/KernelUpdate.swift` | 版本查询（npm registry）与升级 |
 | `Sources/WebPane.swift` | WKWebView 与那堆 delegate |
+| `Sources/WindowKeeper.swift` | 关窗保活（转发代理）+ 拿到 NSWindow |
+| `Sources/DragStrip.swift` | 隐藏标题栏后那 28pt 的拖动区 |
 | `Sources/AppPaths.swift` | 日志/支持目录 |
 | `Sources/ShellLog.swift` | 壳自己的日志（令牌打码） |
 | `Resources/Whaless.icon` | Icon Composer 文档，actool 生成亮/暗全套 |

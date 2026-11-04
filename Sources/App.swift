@@ -11,10 +11,22 @@ struct WhalessApp: App {
             RootView(model: model)
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
+                .background(WindowAccessor { model.adopt($0) })
         }
         .defaultSize(width: 1200, height: 840)
         // 去掉标题栏：内容铺到窗口边缘，红绿灯浮在页面之上。
         .windowStyle(.hiddenTitleBar)
+        MenuBarExtra {
+            Text(model.isReady ? "内核运行中" : "正在启动…")
+            Divider()
+            Button("显示窗口") { model.showWindow() }
+            Button("检查内核更新…") { model.checkKernelUpdate() }
+            Button("打开日志") { NSWorkspace.shared.open(URL(fileURLWithPath: model.logPath)) }
+            Divider()
+            Button("退出 Whaless") { NSApp.terminate(nil) }
+        } label: {
+            Image(systemName: model.isReady ? "water.waves" : "water.waves.and.arrow.down")
+        }
         .commands {
             // 单页应用不需要「新建窗口」
             CommandGroup(replacing: .newItem) {}
@@ -54,8 +66,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// 关窗不退出：内核继续跑，Dock 图标点一下窗口就回来。
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            ShellModel.shared.showWindow()
+            ShellLog.write("window: 从 Dock 重新显示")
+        }
+        return true
     }
 
     /// 退出时收掉子进程，否则它会继续占着端口，下次启动就"看起来打不开"。

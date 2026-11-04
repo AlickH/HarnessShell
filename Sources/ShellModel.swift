@@ -20,6 +20,8 @@ final class ShellModel: ObservableObject {
     private let runner = ServerRunner()
     private var booted = false
     private weak var webView: WKWebView?
+    /// 关窗只是隐藏，所以窗口对象要留着，用来重新显示。
+    weak var window: NSWindow?
 
     func start() {
         guard !booted else { return }
@@ -75,6 +77,25 @@ final class ShellModel: ObservableObject {
     }
 
     var logPath: String { ShellLog.url.path }
+
+    var isReady: Bool {
+        if case .ready = phase { return true }
+        return false
+    }
+
+    // MARK: - 窗口
+
+    func adopt(_ window: NSWindow?) {
+        guard let window else { return }
+        self.window = window
+        WindowKeeper.shared.attach(to: window)
+    }
+
+    func showWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        let target = window ?? NSApp.windows.first { $0.canBecomeMain }
+        target?.makeKeyAndOrderFront(nil)
+    }
 
     // MARK: - 内核
 
