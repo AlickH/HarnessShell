@@ -170,8 +170,8 @@ private struct TopButtons: View {
                             model.newSession()
                         } label: {
                             Image(systemName: "plus.message")
-                                .frame(width: 32, height: 32)
-                                .font(.system(size: 14, weight: .medium))
+                                .frame(width: 36, height: 36)
+                                .font(.system(size: 16, weight: .medium))
                         }
                         .buttonStyle(.plain)
                         .glassEffect(.regular.interactive(), in: Circle())
