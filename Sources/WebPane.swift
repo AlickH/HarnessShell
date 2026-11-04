@@ -153,26 +153,17 @@ struct WebPane: NSViewRepresentable {
           // 侧栏状态上报：原生按钮的位置和显隐都靠它。
           // 折叠动画 0.3s 期间会连发一串，有 lastSent 去重，静止时一条也不发。
           var lastSent = '';
-          // 拖动分隔线期间：应用每一帧都在改列宽、重排会话区，壳这边不能再加活。
-          // 原生那颗液态玻璃按钮每帧重渲染一次极贵（GlassEffectContainer），
-          // 所以拖拽中一律不上报宽度，只上报"正在拖"，让按钮先退场，松手再回来。
-          var lastDragging = null;
+          // 拖动分隔线期间：应用每帧都在改列宽、重排会话区。壳这边不再把每帧的
+          // 宽度都跨进程喂给原生（液态玻璃按钮每帧重渲染很贵），而是限流到 ~30Hz：
+          // 按钮跟着分隔线走、但不参与每一帧，松手时补一次精确值，不会跳。
           function dragging() {
             var f = frameEl();
             return !!(f && f.hasAttribute('data-dragging'));
           }
-          function reportDragging() {
-            var now = dragging();
-            if (now === lastDragging) { return; }
-            lastDragging = now;
-            try {
-              window.webkit.messageHandlers.whaless.postMessage({ dragging: now });
-            } catch (e) {}
-          }
+          var lastDragReport = 0;
 
           function report(list) {
             if (!list || !list.length) { return; }
-            if (dragging()) { return; }
             var width = Math.round(widest(list));
             if (width <= 0) { return; }
             var collapsed = !!document.querySelector('[data-sidebar-collapsed]');
@@ -444,12 +435,19 @@ struct WebPane: NSViewRepresentable {
           function apply() {
             injectStyle();
             reportTheme();
-            reportDragging();
             markRightSeen();
             var list = sidebars();
             if (!list.length) { return; }
-            // 拖拽中不跑任何侧栏逻辑：宽度由应用自己逐帧写，这里插一脚只会更卡。
-            if (dragging()) { return; }
+            // 拖动中：只把新宽度限流喂给原生，其余侧栏逻辑（轨道显隐、宽度变量等）
+            // 全部让路，省得和应用自己的逐帧重排抢主线程。
+            if (dragging()) {
+              var now = performance.now();
+              if (now - lastDragReport > 33) {
+                lastDragReport = now;
+                report(list);
+              }
+              return;
+            }
             // 动画期间一帧 JS 都不跑：宽度由原生那边用同一条曲线自己补间（见
             // ShellModel.beginToggle），可见性也不能动。这里直接返回，省掉每帧的
             // querySelectorAll + getBoundingClientRect + 跨进程 postMessage。
@@ -887,9 +885,6 @@ struct WebPane: NSViewRepresentable {
             if let log = body["log"] as? String {
                 ShellLog.write(log)
                 return
-            }
-            if let dragging = (body["dragging"] as? NSNumber)?.boolValue {
-                model.reportSidebarDragging(dragging)
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
                 model.reportTheme(dark: dark)
