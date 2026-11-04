@@ -30,7 +30,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Info.plist
         CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
+        # 用 Developer ID 证书签名：cdhash 固定，TCC 隐私授权一次后永久有效，
+        # 不再因为 ad-hoc 签名每次编译 cdhash 变化而反复弹 Documents 授权。
+        CODE_SIGN_IDENTITY: "Developer ID Application: Ning Huang (KLU8GF65GP)"
         CODE_SIGNING_REQUIRED: YES
         ENABLE_HARDENED_RUNTIME: NO
         COMBINE_HIDPI_IMAGES: YES

@@ -99,7 +99,122 @@ WKWebView 只是渲染引擎。按前端 bundle 里**真实用到**的 API 补�
 
 内距用 `setTimeout` 而不是 `requestAnimationFrame` 应用——窗口隐藏时 rAF 会被挂起。
 
+## 顶部那一行：按钮和标题谁让谁
 
+原生玻璃按钮浮在网页上（32pt 圆），**web 页面不知道它们存在**。所以页面里凡是贴着顶边
+的内容都会钻到按钮底下：折叠侧栏后「插件」这类整页视图的 `H1` 正好在 `y=28`，被按钮
+压掉小半行。
+
+桌面端不是这么解的。`packages/client/ui-layout` 里有一整套窗口 chrome 变量：
+
+```css
+html[data-platform=darwin]{--dsh-frame-top-clearance:48px}
+html[data-platform=darwin]{--dsh-frame-overlay-top:calc(var(--dsh-frame-top-clearance) + 20px)}
+[data-platform=darwin] .frame[data-sidebar-collapsed]{--dsh-frame-leading-clearance:160px}
+[data-platform=darwin] .pageHeading{padding-top:calc(28px + var(--dsh-frame-top-clearance))}
+```
+
+页面各自去读：插件页/自动化任务页的标题吃 `top-clearance`，会话标题行吃
+`leading-clearance`（自己再减 20px 当内距），设置遮罩和下拉菜单吃 `overlay-top`。
+连原生按钮该待在哪儿也是前端定的——`leadingSeat` 就是 `absolute; top:11px; left:88px`，
+和壳里那两个按钮几乎一个像素不差。
+
+问题在于这些规则**全挂在 `[data-platform=darwin]` 下**，而这个属性我们打不了：
+前端一看到 darwin 就去等 preload 注入的 `dshDesktopBoot`，等不到整棵树不 mount（白屏，
+见上一节的实测）。于是壳自己在注入的样式里把这套等价补回来：
+
+```css
+:root{--dsh-frame-top-clearance:48px;--dsh-frame-overlay-top:68px}
+
+/* 整页标题：插件页叫 pageHead，自动化任务页叫 pageHeading，两个都是顶层容器 */
+[class*="pageHead"]:not([class*="pageHeading"]),
+[class*="pageHeading"]:not([class*="pageHead"] *),
+[class*="detailTop"],[class*="moreHead"]{padding-top:calc(28px + var(--dsh-frame-top-clearance))}
+
+/* 折叠态：挂着 frame 自己的 data-sidebar-collapsed 上，和折叠同一帧生效 */
+[data-sidebar-collapsed]{--dsh-frame-leading-clearance:180px}
+[data-sidebar-collapsed] [class*="centerCol"]{margin-left:-56px}
+```
+
+几点值得记下来：
+
+- **`pageHead` 和 `pageHeading` 会互相踩**。插件页的 `pageHeading` 是 `pageHead` 的子元素，
+  名字里也含 `pageHead`，早期一条 `[class*="pageHead"]` 同时命中两层，内距叠成 152px，
+  标题直接掉到半屏。现在两边各带一个 `:not()` 互斥：父级认 `pageHead`，顶层认
+  `pageHeading`，只吃一份 76px。
+- **类名按后缀匹配**（`X_2TxG_pageHead` / `t-XoWW_pageHeading`），哈希前缀换了也不影响。
+- **折叠状态读 `data-sidebar-collapsed`，不读自己加的类**。之前用 JS 加的 `whaless-rail`
+  要等 50ms 防抖 + 宽度阈值，标题会在侧栏快滑完时才补一下，看着就是"闪一下"。
+  React 改这个属性和改 grid 列是同一帧，跟它走就永远不会错拍。
+- **主栏要往左吃掉那 56px 空轨道**。上游 `collapsedWidth = darwin ? 0 : 56`：桌面端折叠
+  时侧栏轨道塌成 0，主栏从窗口左边缘开始画；我们走 web 分支留着图标轨道，主栏就从 56
+  开始，标题下的分隔线左边空一截。`margin-left:-56px` 把主栏整体带过去（宽度是 stretch
+  自适应，右边缘不动）。
+- **「对话 / 轨迹」这行要单独补**。它跟标题行是兄弟节点（`grid-column:1/-1`），上游只给
+  `titleRow` 让位，折叠后两行左边缘差 140px。用 `[class*="titleRow"] ~ [class*="tabs"]`
+  把同一条 clearance 补给标签行（外加 8px——那是标题 crumb 自己的左右内距）。
+- **过渡只挂在 `[data-animating]` 下**。上游用同一个属性给 grid 列开 0.3s 过渡；内距、
+  `margin-left` 跟着它走，就不会出现"侧栏在滑、标题已经瞬移"的错拍。
+
+实测数字：插件页 `headPad=76px`（`H1` 顶在 `y=76`）、自动化任务页 `H1` 顶在 `y=78`、
+折叠后会话标题文字 `x=188`、标签行 `x=188`、分隔线从 `x=0` 起。
+
+## 按钮跟着分割线走
+
+按钮不是钉死在 `leading: 92` 的：展开时它待在**分割线左侧**（侧栏里面），折叠后才回到
+交通灯旁。这需要壳知道侧栏的真实状态，而页面那边从来不会主动告诉原生。
+
+走了一条最小通道：注入脚本监听 `sidebarCol` 的尺寸变化，变了就
+`window.webkit.messageHandlers.whaless.postMessage({width, collapsed})`，原生
+`WKScriptMessageHandler` 收到后写进 `ShellModel`（`@Published`）。带 `lastSent` 去重，
+静止时一条也不发。
+
+位置只认一个数：
+
+```swift
+private var leading: CGFloat { max(92, model.sidebarWidth - 40) }   // 按钮 32 + 离线 8
+```
+
+- 展开：`侧栏宽 - 40`，按钮右缘离分割线 8px，在侧栏里面；
+- 折叠：`max(92, 56 - 40)` = `92`，和上游 `leadingSeat` 同址，落在交通灯右边。
+
+两个坑值得记：
+
+- **DOM 里有多个 `[class*="sidebarCol"]`**（展开列和折叠 rail 各一份，过渡期间两份都在）。
+  `querySelector` 取第一个，抓到哪个全看渲染顺序——上报值会在 280/56 之间来回跳，按钮
+  跟着乱跑（实测折叠完 10 秒又被"弹"回展开位）。改成**取所有匹配里最宽的那个**，
+  隐藏/恢复也对每个节点各做一遍。
+- **折叠判定不能看宽度阈值**，读 React 自己打在自己 frame 上的 `[data-sidebar-collapsed]`：
+  宽度在折叠瞬间是 280 → 56 一步到位（没有中间值），而属性在折叠那一帧就上来了。
+  只在首帧属性还没上时用 `< 200` 兜底。
+
+因为宽度不是流式的，位置补间得自己做：翻转那一刻把两个状态一起塞进
+`withAnimation(.easeInOut(0.3))`，和 web 端 grid 列的过渡同时长。实测折叠动画中间帧：
+按钮 `240 → 226 → 140 → 92`，加号跟着这趟行程淡入，不是在终点原地弹出。
+
+加号（新会话）只在折叠后出现——展开时侧栏自己有「新会话」，折叠后整列消失才需要这个
+原生入口。这里有个坑：**`.opacity(0)` 藏不住玻璃**。玻璃是 `GlassEffectContainer`
+统一渲染的，`opacity` 只作用到按钮内容，那个圆还留在原地。必须用 `if` 条件渲染 +
+`.transition`。
+
+启动时按钮要等页面渲染出来才显示：首次上报之前 `webContentReady` 还是 false，
+整套 `GlassEffectContainer` 不进场——否则页面还在白屏/启动页，顶上先飘两个玻璃圆。
+
+## 折叠后左栏里那个孤零零的加号
+
+折叠时整列 `visibility: hidden`，本来应该什么都不剩。但有例外：工作区栏折叠成 rail 后，
+`.sectionHeader` 里的「添加工作区」按钮（`<div class=root rail>` 撑满列高、内容垂直居中）
+落在 `y≈356/714` 的正中间，而它自己那条链上有 `visibility: visible`，把父级抢回来的
+可见性又抢回去了——于是左栏中间飘一个文件夹加号。
+
+只压 `visibility` 治不住这种「自己声明可见」的元素，所以折叠时叠三层：
+
+```
+visibility: hidden + opacity: 0 + pointer-events: none
+```
+
+`opacity` 在父级形成合成层，子元素再怎么声明也回不来。实测折叠后左栏带
+（`x < 70`）只剩 `html` / `frame` / `centerCol` 三个整块元素，不再有按钮。
 
 ## 侧栏开关是原生的
 
@@ -184,9 +299,9 @@ rootChildren=0  htmlLen=42271  bg=rgba(0,0,0,0)  errs=none
 - **会话写锁**。壳自己起一个 harness，和桌面端共用 `$DSH_HOME`。同时打开时别两边
   都发起长任务。
 - **每次启动是新进程**，端口也变。这是 `--port 0` 的代价，换来的是永不冲突。
-- **隐藏标题栏依赖类名后缀**（`sidebarCol` / `centerCol`）。前端哪天改了名字，内距会
-  退回加到 `#root` 上——不会压住红绿灯，但顶部会露出 body 底色。日志里
-  `pad(col)=no-col` 就是信号。
+- **隐藏标题栏依赖类名后缀**（`sidebarCol` / `centerCol` / `pageHead`）。前端哪天改了名字，
+  内距会退回加到 `#root` 上——不会压住红绿灯，但顶部会露出 body 底色，页面标题也会
+  重新钻到按钮底下。日志里 `pad(col)=no-col`、`headPad=28px` 就是信号。
 
 ## 孤儿进程
 
@@ -205,6 +320,15 @@ rootChildren=0  htmlLen=42271  bg=rgba(0,0,0,0)  errs=none
 ~/Library/Logs/Whaless/shell.log   # load / didFinish / rendered(+0s/+6s) / 内核检查
 ~/Library/Logs/Whaless/dsh.log     # dsh 的原始输出（含带令牌的地址）
 ```
+
+`rendered` 那行同时是布局体检：
+
+```
+side=280 center=853 rail=0 pad=50px quietTop=56/60 headPad=76px
+```
+
+`pad` 是侧栏内距、`headPad` 是页面标题内距、`rail` 是折叠标记。三个里任何一个
+回到默认值（`pad=-` / `headPad=28px` / `rail=0` 却 `side=56`），就是选择器失效了。
 
 ## 目录
 

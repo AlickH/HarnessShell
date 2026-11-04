@@ -17,9 +17,83 @@ final class ShellModel: ObservableObject {
 
     @Published private(set) var phase: Phase = .starting("正在查找 harness…")
 
+    /// 侧栏当前宽度（由 web 端 ResizeObserver 上报，取 DOM 里最宽的那个 sidebarCol）。
+    /// 原生按钮的位置依赖它：展开时贴着分割线，折叠后回交通灯旁。
+    /// 默认 280 = 上游展开态的标准宽。
+    @Published private(set) var sidebarWidth: CGFloat = 280
+
+    /// 折叠态直接读 React 打在自己 frame 上的 `data-sidebar-collapsed`，
+    /// 不信宽度阈值（DOM 里可能同时有展开列和 rail 两个节点）。
+    @Published private(set) var sidebarCollapsed = false
+
+    /// 首次上报 = 页面真的渲染出来了。在那之前顶部按钮整套不显示。
+    @Published private(set) var webContentReady = false
+    /// 页面自己的主题（网页里切的，可能与系统外观不一致）。窗口底色跟着它走，
+    /// 侧栏的液态玻璃才不会在浅色页面上顶一块深色底。
+    @Published var pageDark = true
+    /// 页面主内容区的实际底色（由 web 采样上报）：液态玻璃就浮在这层色上，
+    /// 这样玻璃和主栏永远同底色，只有材质差异。
+    @Published var pageBgColor = NSColor.windowBackgroundColor
+
+    /// 折叠/展开动画窗口。这 0.3s 里 web 那边一帧 JS 都不跑，按钮位置由这里自己补间：
+    /// 玻璃效果（GlassEffectContainer）每帧重渲染一次很贵，逐帧喂宽度会把整段动画
+    /// 拖到 40fps —— 这正是左侧栏"不如右侧栏顺"的主因。改用一条和 CSS 完全相同的
+    /// 缓动曲线（0.3s / cubic-bezier(.4,0,.2,1)），整段只渲染一次。
+    private var toggleAnimUntil: Date?
+    /// 最近一次展开态的宽度（折叠时用它当展开目标）。
+    private var lastExpandedWidth: CGFloat = 280
+
+    func beginToggle() {
+        let target: CGFloat = sidebarCollapsed ? lastExpandedWidth : 56
+        toggleAnimUntil = Date().addingTimeInterval(0.36)
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
+            sidebarCollapsed = !sidebarCollapsed
+            sidebarWidth = target
+        }
+    }
+
+    /// web → 原生的上报入口（WKScriptMessageHandler 主线程回调）。
+    ///
+    /// 位置由宽度流驱动（每帧更新、天然跟手），这里只管两类"离散事件"：
+    /// 首次上报（整套按钮淡入）、折叠态翻转（给加号的 transition 一个动画事务，
+    /// 让它跟着折叠钮一起边滑边现/隐）。
+    func reportSidebar(width: Double, collapsed: Bool) {
+        // 动画窗口内一律不理：位置由 beginToggle 那条曲线负责，这里再插一脚只会打架。
+        if let until = toggleAnimUntil {
+            if Date() < until { return }
+            toggleAnimUntil = nil
+        }
+        let next = CGFloat(width)
+        if next >= 200 { lastExpandedWidth = next }
+        let wasReady = webContentReady
+        if !wasReady {
+            webContentReady = true
+            withAnimation(.easeOut(duration: 0.35)) {
+                sidebarWidth = next
+                sidebarCollapsed = collapsed
+            }
+            glassHost?.applyState(width: lastExpandedWidth, collapsed: collapsed)
+        } else if collapsed != sidebarCollapsed {
+            // 应用自己折叠/展开（没走壳按钮，比如窄窗口自动折叠）：面板跟着滑。
+            sidebarWidth = next
+            withAnimation(.easeInOut(duration: 0.28)) {
+                sidebarCollapsed = collapsed
+            }
+            glassHost?.animatePanel(collapsing: collapsed, width: lastExpandedWidth)
+        } else {
+            sidebarWidth = next
+        }
+        ShellLog.write("sidebar width: \(Int(width)) collapsed=\(collapsed)"
+            + (wasReady ? "" : " first"))
+    }
+
     private let runner = ServerRunner()
     private var booted = false
     private weak var webView: WKWebView?
+    /// 侧栏实例 WebView（同一个页面的第二个实例，只渲染侧栏 UI 浮在玻璃上）。
+    weak var sideWebView: WKWebView?
+    /// 原生玻璃宿主（三层结构的根视图），面板滑入滑出由它执行。
+    weak var glassHost: GlassHostView?
     /// 关窗只是隐藏，所以窗口对象要留着，用来重新显示。
     weak var window: NSWindow?
 
@@ -64,8 +138,13 @@ final class ShellModel: ObservableObject {
         self.webView = webView
     }
 
+    func attachSide(_ webView: WKWebView) {
+        sideWebView = webView
+    }
+
     func reload() {
         webView?.reload()
+        sideWebView?.reload()
     }
 
     // MARK: - 侧栏
@@ -96,30 +175,36 @@ final class ShellModel: ObservableObject {
 
     /// 原生按钮接管折叠：代 web 端那个（已被隐藏的）按钮点一下。
     ///
-    /// 不能直接改宽度——主栏宽度是应用按"侧栏占多少"算出来的，壳只负责触发它的状态机。
-    /// `visibility:hidden` 的元素依然能 `.click()`，所以按钮藏起来不影响这条路径。
+    /// 新架构下面板滑入滑出是纯原生动画（Tahoe 式平移，主内容不动）；
+    /// web 端只负责切换 `data-sidebar-collapsed`（标题让位等样式跟着变）。
     func toggleSidebar() {
         guard let webView else { return }
+        // 原生按钮先起跑（按钮位置曲线），玻璃面板同步滑入/滑出。
+        beginToggle()
+        let collapsing = sidebarCollapsed
+        glassHost?.animatePanel(collapsing: collapsing, width: lastExpandedWidth)
         webView.evaluateJavaScript("""
             (function () {
               var side = document.querySelector('[class*="sidebarCol"]');
               var toggle = side && side.querySelector('[class*="toggle"]');
-              if (toggle) { toggle.click(); return 'ok'; }
-              return 'no-toggle';
+              if (!toggle) { return 'no-toggle'; }
+              toggle.click();
+              return 'ok';
             })()
             """) { value, error in
-            let result = value as? String ?? error?.localizedDescription ?? "-"
-            ShellLog.write("sidebar toggle: \(result)")
+            ShellLog.write("sidebar toggle: \(value as? String ?? error?.localizedDescription ?? "-")")
         }
     }
 
     func zoom(by delta: CGFloat) {
-        guard let webView else { return }
-        webView.pageZoom = min(max(webView.pageZoom + delta, 0.5), 2.0)
+        for w in [webView, sideWebView].compactMap({ $0 }) {
+            w.pageZoom = min(max(w.pageZoom + delta, 0.5), 2.0)
+        }
     }
 
     func resetZoom() {
         webView?.pageZoom = 1
+        sideWebView?.pageZoom = 1
     }
 
     var logPath: String { ShellLog.url.path }
@@ -134,6 +219,8 @@ final class ShellModel: ObservableObject {
     func adopt(_ window: NSWindow?) {
         guard let window else { return }
         self.window = window
+        // 窗口保持不透明：侧栏玻璃要浮在 App 自己的内容之上，不能把窗口挖穿
+        // 去透桌面壁纸（那是 vibrancy 的语义，不是液态玻璃的）。
         WindowKeeper.shared.attach(to: window)
     }
 

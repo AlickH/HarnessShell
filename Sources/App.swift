@@ -13,29 +13,18 @@ struct WhalessApp: App {
             RootView(model: model)
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
-                .toolbar {
-                    ToolbarItemGroup(placement: .navigation) {
-                        Button {
-                            model.toggleSidebar()
-                        } label: {
-                            Image(systemName: "sidebar.left")
-                        }
-                        .buttonStyle(.glass)
-                        .help("收起 / 展开侧边栏")
-
-                        Button {
-                            model.newSession()
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .buttonStyle(.glass)
-                        .help("新会话")
-                    }
+                .overlay(alignment: .topLeading) {
+                    TopButtons(model: model)
                 }
+                // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
+                // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
+                .ignoresSafeArea()
                 .background(WindowAccessor { model.adopt($0) })
         }
         .defaultSize(width: 1200, height: 840)
-        .windowToolbarStyle(.unified)
+        // .hiddenTitleBar 是 SwiftUI 官方的无标题栏方式：标题栏隐藏、内容铺满、
+        // 交通灯浮在内容上。这比事后改 styleMask 可靠得多。
+        .windowStyle(.hiddenTitleBar)
         MenuBarExtra {
             Text(model.isReady ? "内核运行中" : "正在启动…")
             Divider()
@@ -134,14 +123,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-struct RootView: View {
+/// 顶部那排液态玻璃按钮。
+///
+/// 位置**完全由流式上报的侧栏宽度驱动**，不做自己的补间动画：
+/// `max(92, 宽 - 40)`——展开时紧贴分割线左侧（按钮右缘离线 8px），折叠时分割线
+/// 一路收到 56，按钮跟着滑到 92（交通灯旁）就停。按钮和分割线天然同步，
+/// 不会出现"侧栏收完了按钮才跳过去"。
+///
+/// 加号只在折叠后出现（展开时侧栏自己有「新会话」）；它的淡入淡出由
+/// `reportSidebar` 里翻转那一刻的 `withAnimation` 提供动画事务，所以是
+/// **跟着折叠钮一起边滑边现**，而不是在终点原地弹出。
+///
+/// 首次上报到来之前整套按钮不显示——页面还没渲染时顶上飘两个玻璃圆很突兀。
+private struct TopButtons: View {
     @ObservedObject var model: ShellModel
+
+    private var leading: CGFloat { max(92, model.sidebarWidth - 40) }
+
+    var body: some View {
+        if model.webContentReady {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button {
+                        model.toggleSidebar()
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                            .frame(width: 32, height: 32)
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .help("收起 / 展开侧边栏")
+
+                    // 用 `if` 而不是 `.opacity`：玻璃由 GlassEffectContainer 统一渲染，
+                    // opacity 只作用于按钮内容，那层玻璃还会留在原地。
+                    if model.sidebarCollapsed {
+                        Button {
+                            model.newSession()
+                        } label: {
+                            Image(systemName: "plus.message")
+                                .frame(width: 32, height: 32)
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .help("新会话")
+                        .transition(.scale(scale: 0.7).combined(with: .opacity))
+                    }
+                }
+            }
+            .padding(.top, 12)
+            .padding(.leading, leading)
+            .transition(.opacity)
+        }
+    }
+}
+
+struct RootView: View {    @ObservedObject var model: ShellModel
 
     var body: some View {
         Group {
             switch model.phase {
             case .ready(let url):
                 WebPane(url: url, model: model)
+                    .ignoresSafeArea()
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",
                            detail: detail,
@@ -159,6 +204,9 @@ struct RootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 窗口底色 = 页面主内容区的实际底色（web 采样上报）：液态玻璃浮在这层色
+        // 上，玻璃和主栏永远同底色，只有材质差异。
+        .background(Color(nsColor: model.pageBgColor))
     }
 }
 
