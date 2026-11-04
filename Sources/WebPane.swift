@@ -220,6 +220,21 @@ struct WebPane: NSViewRepresentable {
           var lastHeaderSent = '';
           var menusProbed = false;
 
+          // 默认 app 的图标：网页那颗 split 控件里就是 <img>，画到 canvas 取 dataURL。
+          var lastIconData = null;
+          function targetIconData() {
+            var target = document.querySelector('[data-open-target]');
+            var img = target && target.querySelector('img');
+            if (!img || !img.complete || !img.naturalWidth) { return null; }
+            try {
+              var canvas = document.createElement('canvas');
+              canvas.width = 64;
+              canvas.height = 64;
+              canvas.getContext('2d').drawImage(img, 0, 0, 64, 64);
+              return canvas.toDataURL('image/png');
+            } catch (e) { return null; }
+          }
+
           function sessionHeaderData() {
             var more = document.querySelector('button[aria-label="更多操作"]');
             var target = document.querySelector('[data-open-target]');
@@ -238,6 +253,11 @@ struct WebPane: NSViewRepresentable {
               right: center
                 ? Math.round(center.getBoundingClientRect().right) : null,
               width: Math.round(window.innerWidth),
+              icon: (function () {
+                var data = targetIconData();
+                if (data !== lastIconData) { lastIconData = data; return data; }
+                return null;
+              })(),
               split: !!(target
                 && target.querySelector('button[class*="chevron"]'))
             };

@@ -205,6 +205,8 @@ final class ShellModel: ObservableObject {
     /// 内容列的右边缘（点）：这两颗按钮挂内容区层级，不挂窗口右边。
     @Published private(set) var sessionContentRight: CGFloat?
     @Published private(set) var pageWidth: CGFloat = 0
+    /// 默认打开目标 app 的图标（网页里那颗 split 控件的 <img> 转出来的）。
+    @Published private(set) var openInAppIcon: NSImage?
     @Published private(set) var sessionMenuItems: [String] = []
     @Published private(set) var openInAppItems: [String] = []
 
@@ -221,6 +223,12 @@ final class ShellModel: ObservableObject {
         let split = (raw["split"] as? NSNumber)?.boolValue ?? false
         sessionContentRight = (raw["right"] as? NSNumber).map { CGFloat(truncating: $0) }
         pageWidth = (raw["width"] as? NSNumber).map { CGFloat(truncating: $0) } ?? pageWidth
+        if let dataURL = raw["icon"] as? String,
+           let comma = dataURL.firstIndex(of: ","),
+           let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])),
+           let image = NSImage(data: data) {
+            openInAppIcon = image
+        }
         if more != sessionMoreRect || target != sessionTargetRect || split != sessionSplit {
             sessionMoreRect = more
             sessionTargetRect = target
@@ -253,14 +261,16 @@ final class ShellModel: ObservableObject {
         // 锚点要和原生按钮的实际位置一致（不是网页那颗的位置）。
         guard let contentRight = sessionContentRight, pageWidth > 0 else { return }
         let size: CGFloat = 36
+        let chevron: CGFloat = 24
         let spacing: CGFloat = 8
-        let rowWidth = size * 2 + spacing
+        let targetWidth = sessionSplit ? size + chevron : size
+        let rowWidth = targetWidth + spacing + size
         let adjacentToWindow = pageWidth - contentRight < size + spacing + 4
         let reserve = adjacentToWindow ? size + spacing : 0
         let rowStart = contentRight - 12 - reserve - rowWidth
         let centerX: CGFloat = kind == "apps"
-            ? rowStart + size / 2
-            : rowStart + size + spacing + size / 2
+            ? rowStart + size + chevron / 2
+            : rowStart + targetWidth + spacing + size / 2
         let anchor = NSPoint(x: centerX, y: 12 + size + 12)
         DispatchQueue.main.async {
             menu.popUp(positioning: nil, at: anchor, in: contentView)

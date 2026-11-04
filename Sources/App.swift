@@ -223,14 +223,22 @@ private struct VibrancyBackdrop: NSViewRepresentable {
 
 /// 会话页内容区右上角的两颗（开在应用里 / 更多操作）：
 /// 挂在**内容区**层级 —— 右边对齐内容列的右边缘，右侧栏打开时跟着内容列一起左移。
-/// 和右上角那排同样 36pt、间距 8；两颗都是菜单按钮，点了弹系统菜单。
+/// 「开在应用里」是分两半的胶囊：左半是默认 app 图标（点它直接打开），
+/// 右半是箭头（点它弹系统菜单）；「…」是圆钮，点了也弹系统菜单。
 private struct SessionHeaderButtons: View {
     @ObservedObject var model: ShellModel
 
     private let size: CGFloat = 36
+    private let chevronWidth: CGFloat = 24
     private let spacing: CGFloat = 8
 
-    private func button(symbol: String, help: String, menu: String) -> some View {
+    private var targetWidth: CGFloat {
+        model.sessionSplit ? size + chevronWidth : size
+    }
+
+    private var rowWidth: CGFloat { targetWidth + spacing + size }
+
+    private func menuButton(symbol: String, help: String, menu: String) -> some View {
         Button {
             model.showSystemMenu(menu)
         } label: {
@@ -247,19 +255,52 @@ private struct SessionHeaderButtons: View {
     var body: some View {
         if let right = model.sessionContentRight,
            model.sessionMoreRect != nil || model.sessionTargetRect != nil {
-            let rowWidth = size * 2 + spacing
-            // 内容列右缘贴着窗口右边时（右侧栏收起），要给右上角那颗开关留一格；
-            // 右侧栏打开时内容列整体左移，整排跟着往左挤，位置一致地跟随。
+            // 内容列右缘贴着窗口右边时（右侧栏收起），要给右上角那颗开关留一格。
             let adjacentToWindow = model.pageWidth > 0
                 && model.pageWidth - right < size + spacing + 4
             let trailingReserve = adjacentToWindow ? size + spacing : 0
             HStack(spacing: spacing) {
                 if model.sessionTargetRect != nil {
-                    button(symbol: "arrow.up.forward.app",
-                           help: "在应用中打开", menu: "apps")
+                    HStack(spacing: 0) {
+                        Button {
+                            model.openInDefaultApp()
+                        } label: {
+                            Group {
+                                if let icon = model.openInAppIcon {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .interpolation(.high)
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 18, height: 18)
+                                } else {
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .font(.system(size: 16, weight: .medium))
+                                }
+                            }
+                            .frame(width: size, height: size)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("在默认应用中打开")
+
+                        if model.sessionSplit {
+                            Button {
+                                model.showSystemMenu("apps")
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .frame(width: chevronWidth, height: size)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("选择应用")
+                        }
+                    }
+                    .glassEffect(.regular.interactive(), in: Capsule())
                 }
+
                 if model.sessionMoreRect != nil {
-                    button(symbol: "ellipsis", help: "更多操作", menu: "more")
+                    menuButton(symbol: "ellipsis", help: "更多操作", menu: "more")
                 }
             }
             .offset(x: right - 12 - trailingReserve - rowWidth, y: 12)
