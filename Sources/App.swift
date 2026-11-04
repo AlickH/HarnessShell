@@ -467,6 +467,32 @@ struct RootView: View {    @ObservedObject var model: ShellModel
     }
 }
 
+/// Deepy 像素鲸鱼：从 dsh-claude-style 皮肤里抓回来的精灵表
+/// （1520×780，每格 38×156，首帧偏移 12,26，显示按每格 2px → 72×48）。
+struct DeepySprite: View {
+    var scale: CGFloat = 1
+
+    private var sheet: NSImage? {
+        guard let url = Bundle.main.url(forResource: "deepy-sprite", withExtension: "svg") else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }
+
+    var body: some View {
+        if let sheet {
+            Image(nsImage: sheet)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: sheet.size.width * 2 * scale,
+                       height: sheet.size.height * 2 * scale)
+                .offset(x: -12 * 2 * scale, y: -26 * 2 * scale)
+                .frame(width: 72 * scale, height: 48 * scale, alignment: .topLeading)
+                .clipped()
+        }
+    }
+}
+
 /// 品牌 wordmark：SVG 里填的是 `var(--dsw-alias-label-primary)` 这类变量，
 /// 直接当图片加载变量不会解析 —— 读出来按当前外观替换成实际色值再加载。
 func brandWordmark(dark: Bool) -> NSImage? {
@@ -523,8 +549,8 @@ struct StatusView: View {
                     .padding(.bottom, 6)
             }
             if showsSpinner {
-                ProgressView()
-                    .controlSize(wide ? .regular : .small)
+                DeepySprite(scale: wide ? 1.6 : 1.2)
+                    .padding(.bottom, 2)
             }
             Text(title)
                 .font(wide ? .title3 : .headline)
