@@ -224,8 +224,8 @@ private struct RightButtonsRow: View {
             model.clickPageButton(id)
         } label: {
             Image(systemName: symbol)
-                .frame(width: 32, height: 32)
-                .font(.system(size: 14, weight: .medium))
+                .frame(width: 36, height: 36)
+                .font(.system(size: 16, weight: .medium))
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: Circle())
