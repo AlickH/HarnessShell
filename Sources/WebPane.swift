@@ -237,6 +237,7 @@ struct WebPane: NSViewRepresentable {
               // 这两颗挂在"内容区"层级：右边缘跟着内容列走，不跟窗口右边走。
               right: center
                 ? Math.round(center.getBoundingClientRect().right) : null,
+              width: Math.round(window.innerWidth),
               split: !!(target
                 && target.querySelector('button[class*="chevron"]'))
             };

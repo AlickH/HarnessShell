@@ -244,6 +244,12 @@ private struct SessionHeaderButtons: View {
     var body: some View {
         if let right = model.sessionContentRight,
            model.sessionMoreRect != nil || model.sessionTargetRect != nil {
+            let rowWidth = size * 2 + spacing
+            // 内容列右缘贴着窗口右边时（右侧栏收起），要给右上角那颗开关留一格；
+            // 右侧栏打开时内容列整体左移，整排跟着往左挤，位置一致地跟随。
+            let adjacentToWindow = model.pageWidth > 0
+                && model.pageWidth - right < size + spacing + 4
+            let trailingReserve = adjacentToWindow ? size + spacing : 0
             HStack(spacing: spacing) {
                 if model.sessionTargetRect != nil {
                     button(symbol: "arrow.up.forward.app",
@@ -253,9 +259,9 @@ private struct SessionHeaderButtons: View {
                     button(symbol: "ellipsis", help: "更多操作", menu: "more")
                 }
             }
-            // 右侧栏收起时，右上角那颗开关也占着窗口右边这一格，给它留出位置。
-            .offset(x: right - 12 - size * 2 - spacing
-                    - (model.pageRightOpen ? 0 : size + spacing), y: 12)
+            .offset(x: right - 12 - trailingReserve - rowWidth, y: 12)
+            .animation(.easeInOut(duration: 0.3), value: right)
+            .animation(.easeInOut(duration: 0.3), value: trailingReserve)
         }
     }
 }

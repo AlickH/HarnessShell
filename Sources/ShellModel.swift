@@ -204,6 +204,7 @@ final class ShellModel: ObservableObject {
     @Published private(set) var sessionSplit = false
     /// 内容列的右边缘（点）：这两颗按钮挂内容区层级，不挂窗口右边。
     @Published private(set) var sessionContentRight: CGFloat?
+    @Published private(set) var pageWidth: CGFloat = 0
     @Published private(set) var sessionMenuItems: [String] = []
     @Published private(set) var openInAppItems: [String] = []
 
@@ -219,6 +220,7 @@ final class ShellModel: ObservableObject {
         let target = rect("target")
         let split = (raw["split"] as? NSNumber)?.boolValue ?? false
         sessionContentRight = (raw["right"] as? NSNumber).map { CGFloat(truncating: $0) }
+        pageWidth = (raw["width"] as? NSNumber).map { CGFloat(truncating: $0) } ?? pageWidth
         if more != sessionMoreRect || target != sessionTargetRect || split != sessionSplit {
             sessionMoreRect = more
             sessionTargetRect = target
