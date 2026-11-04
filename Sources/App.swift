@@ -143,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 private struct TopButtons: View {
     @ObservedObject var model: ShellModel
 
-    private var leading: CGFloat { max(92, model.sidebarWidth - 40) }
+    private var leading: CGFloat { max(88, model.sidebarWidth - 44) }
 
     var body: some View {
         if model.webContentReady {
@@ -153,8 +153,8 @@ private struct TopButtons: View {
                         model.toggleSidebar()
                     } label: {
                         Image(systemName: "sidebar.left")
-                            .frame(width: 32, height: 32)
-                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 36, height: 36)
+                            .font(.system(size: 16, weight: .medium))
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Circle())
@@ -224,8 +224,8 @@ private struct RightButtonsRow: View {
             model.clickPageButton(id)
         } label: {
             Image(systemName: symbol)
-                .frame(width: 28, height: 28)
-                .font(.system(size: 13, weight: .medium))
+                .frame(width: 32, height: 32)
+                .font(.system(size: 14, weight: .medium))
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: Circle())
@@ -254,8 +254,8 @@ private struct RightButtonsRow: View {
                     model.toggleRightSidebar()
                 } label: {
                     Image(systemName: "sidebar.right")
-                        .frame(width: 32, height: 32)
-                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 36, height: 36)
+                        .font(.system(size: 16, weight: .medium))
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
