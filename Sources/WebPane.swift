@@ -312,18 +312,22 @@ struct WebPane: NSViewRepresentable {
               // 淡入会让整个面板"闪一下"。
               '[class*="sidebarCol"] [class*="wide"],'
                 + '[class*="sidebarCol"] [class*="railIn"] *{animation:none !important}',
-              // 列宽过渡是整段动画的发动机：主栏左缘按它走，复制品逐帧贴着它滑。
-              // 丢了这条，列宽一帧跳完，什么平滑都无从谈起。
+              // 列宽不做过渡：点下去一次到位（只重排/重绘一帧），
+              // 平滑交给下面主栏的 transform —— 全程合成器，不逐帧跑布局。
+              // 列宽跳变后主栏比窗口窄（展开态那一侧），滑动时尾边会露底；
+              // 动画期间给 frame 铺一层和主栏同色的底盖住，收尾就撤。
               '[data-whaless-anim] [class*="frame"]{'
-                + 'transition:grid-template-columns var(--ds-transition-duration-slow,.3s) '
-                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
+                + 'background:var(--dsw-alias-bg-base) !important;'
+                + 'transition:none !important}',
               // 标题让位跟着侧栏一起过渡：只在壳主动切换的那一下挂，窗口缩放不拖慢。
               '[data-whaless-anim] [class*="titleRow"],'
                 + '[data-whaless-anim] [class*="titleRow"] ~ [class*="tabs"]{'
                 + 'transition:padding-inline-start var(--ds-transition-duration-slow,.3s) '
                 + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
+              // 主栏：布局已经跳到终点，这里用 transform 把"内容原本该走的位移"
+              // 补出来（起点由 JS 按实测的内容中心差写内联值）。
               '[data-whaless-anim] [class*="centerCol"]{'
-                + 'transition:margin-left var(--ds-transition-duration-slow,.3s) '
+                + 'transition:transform var(--ds-transition-duration-slow,.3s) '
                 + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
               '@media (prefers-reduced-motion:reduce){',
               '  [data-whaless-anim] [class*="titleRow"],'
@@ -637,6 +641,19 @@ struct WebPane: NSViewRepresentable {
             return shell;
           }
 
+          // 内容当前的横向中心（页面坐标）。列宽跳变后用它算"内容实际该走多远"：
+          // 长对话是居中列，列变宽时内容不是简单平移整个列宽，而是重新居中。
+          function contentCenterX() {
+            var sc = document.querySelector('[data-conversation-scroll]');
+            if (!sc) {
+              var c = document.querySelector('[class*="centerCol"]');
+              if (c) { sc = c; }
+            }
+            if (!sc) { return null; }
+            var r = sc.getBoundingClientRect();
+            return r.left + r.width / 2;
+          }
+
           // 真身面板此刻的实际位移。收尾时把复制品摆到同一个值上再撤，
           // 否则"换人"那一帧会差 1~2px —— 就是展开末尾那一下抖动。
           function panelTx() {
@@ -657,7 +674,9 @@ struct WebPane: NSViewRepresentable {
             var a = anim;
             anim = null;
             if (a.timer) { clearTimeout(a.timer); }
-            if (a.frame && a.onEnd) { a.frame.removeEventListener('transitionend', a.onEnd); }
+            if (a.ghost && a.onGhostEnd) {
+              a.ghost.removeEventListener('transitionend', a.onGhostEnd);
+            }
             // 面板自己的 transform 过渡可能比列宽晚一两帧才落位。先等它走完再"换人"：
             // 否则最后一帧真身还停在离终点 1px 的地方，复制品一撤，边缘和原生按钮
             // 就一起往回跳一像素。最多等 4 帧，绝不把画面一直冻着。
@@ -693,6 +712,10 @@ struct WebPane: NSViewRepresentable {
               a.ghost.setAttribute('data-whaless-ghost-closed', '');
               savedGhost = shell;
             }
+            if (a.center) {
+              a.center.style.removeProperty('transform');
+              a.center.style.removeProperty('transition');
+            }
             html.removeAttribute('data-whaless-anim');
             apply();
             // 原生侧在动画窗口内故意不理宽度上报，而 report() 已经记过 lastSent，
@@ -707,8 +730,10 @@ struct WebPane: NSViewRepresentable {
               var html = document.documentElement;
               var frame = frameEl();
               var collapsing = !document.querySelector('[data-sidebar-collapsed]');
-              anim = { ghost: null, shell: null, frame: frame, timer: 0, onEnd: null,
-                       collapsing: collapsing };
+              anim = { ghost: null, shell: null, center: null, frame: frame,
+                       timer: 0, onEnd: null, onGhostEnd: null,
+                       beforeCenter: null, collapsing: collapsing };
+              anim.beforeCenter = contentCenterX();
               if (collapsing) {
                 // 收起：内容马上要换成图标版，先冻一份。
                 anim.shell = makeGhost();
@@ -743,13 +768,13 @@ struct WebPane: NSViewRepresentable {
                 }
               }
               html.setAttribute('data-whaless-anim', '');
-              if (frame) {
-                anim.onEnd = function (e) {
-                  if (e.target === frame && e.propertyName === 'grid-template-columns') {
+              if (anim.ghost) {
+                anim.onGhostEnd = function (e) {
+                  if (e.target === anim.ghost && e.propertyName === 'transform') {
                     finish();
                   }
                 };
-                frame.addEventListener('transitionend', anim.onEnd);
+                anim.ghost.addEventListener('transitionend', anim.onGhostEnd);
               }
               // 兜底：万一没触发 transitionend（列宽没变），别把画面一直冻着。
               // 必须晚于动画本身，否则会在半路把复制品撤掉。
@@ -760,11 +785,36 @@ struct WebPane: NSViewRepresentable {
             // 两边从同一次样式重算开始、同一条曲线滑，中缝不再靠每帧 JS 修。
             afterClick: function () {
               if (!anim || !anim.ghost) { return; }
-              if (anim.collapsing) {
-                anim.ghost.setAttribute('data-whaless-ghost-closed', '');
-              } else {
-                anim.ghost.removeAttribute('data-whaless-ghost-closed');
+              // React 的提交在事件之后（微任务/下一帧），这里必须等布局真的变了
+              // 才能量出"内容该走多远"；rAF 在提交之后、绘制之前，正好。
+              var tries = 0;
+              function start() {
+                if (!anim) { return; }
+                if (anim.collapsing) {
+                  anim.ghost.setAttribute('data-whaless-ghost-closed', '');
+                } else {
+                  anim.ghost.removeAttribute('data-whaless-ghost-closed');
+                }
+                var col = document.querySelector('[class*="centerCol"]');
+                var after = contentCenterX();
+                var delta = (col && after !== null && anim.beforeCenter !== null)
+                  ? anim.beforeCenter - after : 0;
+                // 布局还没提交时差值是 0，下一帧再看（最多 3 帧）
+                if (Math.abs(delta) < 0.5 && tries++ < 3) {
+                  requestAnimationFrame(start);
+                  return;
+                }
+                if (!col || Math.abs(delta) < 0.5) { return; }
+                // 布局已经跳到终点：把主栏先摆回"内容原本在的位置"，再补间到 0。
+                anim.center = col;
+                var st = col.style;
+                st.setProperty('transition', 'none', 'important');
+                st.setProperty('transform', 'translateX(' + delta + 'px)', 'important');
+                void col.offsetWidth;
+                st.removeProperty('transition');
+                st.setProperty('transform', 'translateX(0px)', 'important');
               }
+              requestAnimationFrame(start);
             }
           };
 
