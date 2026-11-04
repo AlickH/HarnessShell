@@ -250,15 +250,20 @@ final class ShellModel: ObservableObject {
             item.representedObject = kind
             menu.addItem(item)
         }
-        let rect = kind == "apps" ? sessionTargetRect : sessionMoreRect
-        guard let rect else { return }
-        let x = rect.midX
-        let y = rect.midY
-        // 异步弹出：同步 popUp 会被这次点击的 mouseUp 立刻关掉。
+        // 锚点要和原生按钮的实际位置一致（不是网页那颗的位置）。
+        guard let contentRight = sessionContentRight, pageWidth > 0 else { return }
+        let size: CGFloat = 36
+        let spacing: CGFloat = 8
+        let rowWidth = size * 2 + spacing
+        let adjacentToWindow = pageWidth - contentRight < size + spacing + 4
+        let reserve = adjacentToWindow ? size + spacing : 0
+        let rowStart = contentRight - 12 - reserve - rowWidth
+        let centerX: CGFloat = kind == "apps"
+            ? rowStart + size / 2
+            : rowStart + size + spacing + size / 2
+        let anchor = NSPoint(x: centerX, y: 12 + size + 12)
         DispatchQueue.main.async {
-            menu.popUp(positioning: nil,
-                       at: NSPoint(x: x, y: contentView.bounds.height - y),
-                       in: contentView)
+            menu.popUp(positioning: nil, at: anchor, in: contentView)
         }
     }
 
