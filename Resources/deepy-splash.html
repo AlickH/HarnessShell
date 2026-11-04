@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <style>
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-  /* 和 dsh-claude-style 皮肤里 .dsh-claude-deepy-* 的规则完全同构 */
-  .deepy { position: absolute; left: 50%; top: 50%; width: 128px; height: 128px;
-           transform: translate(-50%, -50%); pointer-events: none; }
+  /* 和 dsh-claude-style 皮肤里 .dsh-claude-deepy* 的规则同构：容器 104×104 做裁剪框，
+     里面放一个远大于容器的精灵条，靠 left/top 选中当前帧。 */
+  .deepy { position: absolute; left: 50%; top: 50%; width: 104px; height: 104px;
+           transform: translate(-50%, -50%); overflow: hidden; }
   .sprite { position: absolute;
             left: calc(var(--x, 0) * 2px);
             top: calc(var(--y, 0) * 2px);
