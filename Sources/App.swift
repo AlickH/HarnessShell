@@ -105,10 +105,11 @@ struct RootView: View {
             case .ready(let url):
                 WebPane(url: url, model: model)
                     .ignoresSafeArea()
-                    // 红绿灯那一行现在是页面自己的背景，拖动窗口靠这层透明区域。
-                    .overlay(alignment: .top) {
+                    // 拖动窗口只靠左上角这一小块：横跨整条会把页面顶栏的按钮一起盖住，
+                    // 那 28pt 里的点击全被这层吃掉，按钮就"点不动"了。
+                    .overlay(alignment: .topLeading) {
                         DragStrip()
-                            .frame(height: 28)
+                            .frame(width: 90, height: 28)
                     }
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",

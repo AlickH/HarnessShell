@@ -187,10 +187,8 @@ struct WebPane: NSViewRepresentable {
                     webView.evaluateJavaScript("""
                         (function () {
                           var col = document.querySelector('[class*="sidebarCol"]');
-                          var root = document.getElementById('root');
                           var text = document.body ? document.body.innerText.slice(0, 30) : '';
                           return 'pad(col)=' + (col ? getComputedStyle(col).paddingTop : 'no-col')
-                            + ' pad(root)=' + (root ? getComputedStyle(root).paddingTop : '-')
                             + ' | ' + text;
                         })()
                         """) { value, _ in
