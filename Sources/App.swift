@@ -467,29 +467,40 @@ struct RootView: View {    @ObservedObject var model: ShellModel
     }
 }
 
-/// Deepy 像素鲸鱼：从 dsh-claude-style 皮肤里抓回来的精灵表
-/// （1520×780，每格 38×156，首帧偏移 12,26，显示按每格 2px → 72×48）。
+/// Deepy 像素鲸鱼：从 dsh-claude-style 皮肤里抓回来的精灵表。
+/// 精灵表 1520×780，栅格化扫描得到 8 列：帧起点 x = 6/196/386/575/765/955/1146/1336，
+/// 帧区 y=7、帧宽 174、帧高 118。
 struct DeepySprite: View {
-    var scale: CGFloat = 1
+    var width: CGFloat = 90
 
-    private var sheet: NSImage? {
+    @State private var frameIndex = 0
+    private let timer = Timer.publish(every: 0.16, on: .main, in: .common).autoconnect()
+
+    private let frameXs: [CGFloat] = [6, 196, 386, 575, 765, 955, 1146, 1336]
+    private let frameY: CGFloat = 7
+    private let frameW: CGFloat = 174
+    private let frameH: CGFloat = 118
+
+    var body: some View {
+        if let sheet = deepySheet() {
+            let scale = width / frameW
+            Image(nsImage: sheet)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: 1520 * scale, height: 780 * scale)
+                .offset(x: -frameXs[frameIndex % frameXs.count] * scale,
+                        y: -frameY * scale)
+                .frame(width: width, height: frameH * scale, alignment: .topLeading)
+                .clipped()
+                .onReceive(timer) { _ in frameIndex = (frameIndex + 1) % frameXs.count }
+        }
+    }
+
+    private func deepySheet() -> NSImage? {
         guard let url = Bundle.main.url(forResource: "deepy-sprite", withExtension: "svg") else {
             return nil
         }
         return NSImage(contentsOf: url)
-    }
-
-    var body: some View {
-        if let sheet {
-            Image(nsImage: sheet)
-                .resizable()
-                .interpolation(.none)
-                .frame(width: sheet.size.width * 2 * scale,
-                       height: sheet.size.height * 2 * scale)
-                .offset(x: -12 * 2 * scale, y: -26 * 2 * scale)
-                .frame(width: 72 * scale, height: 48 * scale, alignment: .topLeading)
-                .clipped()
-        }
     }
 }
 
@@ -549,7 +560,7 @@ struct StatusView: View {
                     .padding(.bottom, 6)
             }
             if showsSpinner {
-                DeepySprite(scale: wide ? 1.6 : 1.2)
+                DeepySprite(width: wide ? 110 : 80)
                     .padding(.bottom, 2)
             }
             Text(title)
