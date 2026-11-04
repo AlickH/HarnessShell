@@ -489,21 +489,16 @@ struct WebPane: NSViewRepresentable {
               // 落位后原生胶囊接上时形状一致，不会"从圆角矩形跳到胶囊"。
               '[class*="sidebarCol"] [class*="newSession"]'
                 + '{border-radius:999px !important}',
-              // 输入框外框（composer 那张大圆角卡片）：玻璃底。
-              // 这里只能用 CSS 近似 —— glassEffect 是原生视图效果，挂在网页里
-              // 要么被网页盖住、要么盖在网页上把文字糊掉。所以把"玻璃"的几个
-              // 视觉要素都补齐：半透明底 + 更强的模糊/饱和 + 亮描边 + 顶部高光 + 斜向光泽。
+              // 输入框外框（composer 那张大圆角卡片）：半透明 + 背景模糊，
+              // 做出玻璃卡片质感；描边改成和玻璃一致的发丝边 + 顶部一道内高光。
               '[class*="composerStack"] [class*="card"]'
-                + '{background:linear-gradient(135deg,'
-                + 'rgba(255,255,255,.06),rgba(255,255,255,0) 45%),'
-                + 'color-mix(in srgb,var(--dsw-alias-bg-layer-1) 45%,transparent)'
+                + '{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent)'
                 + ' !important;'
-                + ' -webkit-backdrop-filter:blur(32px) saturate(1.9);'
-                + ' backdrop-filter:blur(32px) saturate(1.9);'
-                + ' border:1px solid rgba(255,255,255,.14) !important;'
-                + ' box-shadow:inset 0 1px 0 rgba(255,255,255,.16),'
-                + 'inset 0 -1px 0 rgba(255,255,255,.04),'
-                + '0 10px 30px rgba(0,0,0,.18) !important}',
+                + ' -webkit-backdrop-filter:blur(24px) saturate(1.6);'
+                + ' backdrop-filter:blur(24px) saturate(1.6);'
+                + ' border-color:color-mix(in srgb,var(--dsw-alias-border-l3) 80%,transparent)'
+                + ' !important;'
+                + ' box-shadow:inset 0 1px 0 rgba(255,255,255,.06) !important}',
               // 右侧栏引导区那几张大按钮：半透明底 + 背景模糊，做出玻璃卡片的感觉
               // （面板本身仍是实底，所以是"透玻璃质感"而不是真透桌面）。
               '[data-sidebar-right-guide-entry],'
