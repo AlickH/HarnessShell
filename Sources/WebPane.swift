@@ -210,6 +210,24 @@ struct WebPane: NSViewRepresentable {
               // 会话列表底部那条渐隐是"渐隐到侧栏实色底"的：侧栏改玻璃之后它
               // 会变成一条盖住材质的实色条，直接去掉（列表本身滚动不受影响）。
               '[class*="sidebarCol"] [class*="_fade"]{display:none !important}',
+              // ---- 右侧栏第一次展开的入场动画 ----
+              // 上游要等自己创建出 surface 才渲染右侧面板，面板挂载时已经是展开态：
+              // CSS 过渡没有"上一态"可补间，第一次只能直接出现（看起来像闪一下），
+              // 之后面板留在 DOM 里、开关才有过渡。这里给"第一次挂载"补一条同参数
+              // 的入场动画，等它走完再由 JS 打标记，之后都交回给上游的过渡。
+              '@keyframes whaless-right-in{'
+                + 'from{transform:translateX(var(--dsh-sidebar-width))}}',
+              'html:not([data-whaless-right-seen])'
+                + ' [data-sidebar-right-panel][data-sidebar-right-open] [data-dockkit-host=dock],'
+                + 'html:not([data-whaless-right-seen])'
+                + ' [data-sidebar-right-panel][data-sidebar-right-open] [data-dockkit-empty],'
+                + 'html:not([data-whaless-right-seen])'
+                + ' [data-sidebar-right-panel][data-sidebar-right-open] [data-dockkit-divider]{'
+                + 'animation:whaless-right-in var(--ds-transition-duration-slow,.3s) '
+                + 'var(--ds-ease-in-out)}',
+              '@media (prefers-reduced-motion:reduce){'
+                + 'html:not([data-whaless-right-seen]) [data-sidebar-right-panel] *'
+                + '{animation:none !important}}',
               // ---- 顶部让位：把桌面端 `[data-platform=darwin]` 那套等价补回来 ----
               // 上游 layout 里 darwin 模式会声明这两个变量（48px 标题栏 + 68px 浮层），
               // 页面标题（`pageHead` / `pageHeading`，28px + clearance）和设置遮罩都用它。
@@ -364,6 +382,20 @@ struct WebPane: NSViewRepresentable {
           // 上一拍读到的列宽，用来判断"是否已经稳定"。
           var lastSampledW = 0;
 
+          // 右侧栏的"第一次展开"标记：见上面 CSS 的说明。
+          var rightSeenScheduled = false;
+          function markRightSeen() {
+            if (rightSeenScheduled) { return; }
+            var html = document.documentElement;
+            if (html.hasAttribute('data-whaless-right-seen')) { return; }
+            if (!document.querySelector(
+                '[data-sidebar-right-panel][data-sidebar-right-open]')) { return; }
+            rightSeenScheduled = true;
+            setTimeout(function () {
+              html.setAttribute('data-whaless-right-seen', '');
+            }, durMs() * 1.5);
+          }
+
           // 快照是某一刻"拍"下来的，主题一换它就过时了（深色快照滑进浅色界面）。
           // 记下拍摄时的主题指纹，复用前对一下，对不上就丢掉、退回真身滑入。
           var savedTheme = '';
@@ -384,6 +416,7 @@ struct WebPane: NSViewRepresentable {
           function apply() {
             injectStyle();
             reportTheme();
+            markRightSeen();
             var list = sidebars();
             if (!list.length) { return; }
             // 动画期间一帧 JS 都不跑：宽度由原生那边用同一条曲线自己补间（见
