@@ -96,7 +96,7 @@ struct WebPane: NSViewRepresentable {
             bar.id = TOOLBAR;
             // 侧栏图标 + 新会话
             bar.appendChild(makeButton(icon('<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/>'),
-              '显示侧栏', function () { setHidden(false); }));
+              '显示侧栏', function () { expandSidebar(); }));
             bar.appendChild(makeButton(icon('<path d="M8 3.5v9M3.5 8h9"/>'),
               '新会话', function () {
                 var target = document.querySelector('[class*="newSession"]');
@@ -106,12 +106,29 @@ struct WebPane: NSViewRepresentable {
             return bar;
           }
 
-          function setHidden(hidden) {
-            var side = sidebar();
-            if (!side) { return; }
-            side.style.setProperty('display', hidden ? 'none' : '', hidden ? 'important' : '');
-            document.documentElement.classList.toggle(HIDDEN, hidden);
-            toolbar().style.display = hidden ? 'flex' : 'none';
+          // 侧栏"展开 → 窄条"是应用自己的状态机（它会据此重算主栏宽度）。
+          // 所以不去硬藏：让它先折成窄条，再把窄条抹掉并把主栏拉满；
+          // 恢复时反过来——把标记清掉、让它自己展开。
+          var RAIL_FLAG = 'whalessRail';
+
+          function center() { return document.querySelector('[class*="centerCol"]'); }
+
+          // 只做"视觉消失"：宽度不动。
+          // 主栏宽度是应用按"侧栏占多少"算出来的（实测 win-56），我们把它改 0 只会让
+          // 主栏少算 56px、右边留一条空白。所以保留占位，只把这一条画成透明。
+          function smoothRail(side) {
+            [['opacity', '0'], ['background', 'transparent'], ['border-color', 'transparent'],
+             ['box-shadow', 'none'], ['pointer-events', 'none']].forEach(function (pair) {
+              side.style.setProperty(pair[0], pair[1], 'important');
+            });
+            document.documentElement.classList.add(HIDDEN);
+            toolbar().style.display = 'flex';
+          }
+
+          function restoreRail(side) {
+            ['opacity', 'background', 'border-color', 'box-shadow', 'pointer-events']
+              .forEach(function (name) { side.style.removeProperty(name); });
+            toolbar().style.display = 'none';
           }
 
           function setPad(node, px) {
@@ -148,21 +165,28 @@ struct WebPane: NSViewRepresentable {
             }
             clearRoot();
             for (var i = 0; i < center.length; i++) { setPad(center[i], 0); }
-            // 折叠成窄条时（宽 < 200）留内距，避免图标压在交通灯底下
-            if (side) { setPad(side, side.getBoundingClientRect().width > 200 ? 0 : inset); }
-            if (document.documentElement.classList.contains(HIDDEN)) { toolbar().style.display = 'flex'; }
+            if (side) {
+              var width = side.getBoundingClientRect().width;
+              if (side.dataset[RAIL_FLAG] === '1') {
+                smoothRail(side);                       // 已经抹掉了，保持
+              } else if (width > 0 && width < 200) {
+                side.dataset[RAIL_FLAG] = '1';          // 刚折成窄条：抹掉并拉满主栏
+                smoothRail(side);
+              } else if (width >= 200) {
+                delete side.dataset[RAIL_FLAG];         // 又展开了
+                restoreRail(side);
+              }
+              setPad(side, 0);
+            }
           }
 
-          // 侧栏上的折叠按钮：不让它收成窄条，直接把侧栏藏掉
-          document.addEventListener('click', function (event) {
+          // 恢复按钮：点窄条上那个（已经看不见的）折叠按钮，让它自己展开。
+          function expandSidebar() {
             var side = sidebar();
-            if (!side || !event.target.closest) { return; }
-            var toggle = event.target.closest('[class*="toggle"]');
-            if (!toggle || !side.contains(toggle)) { return; }
-            event.preventDefault();
-            event.stopPropagation();
-            setHidden(true);
-          }, true);
+            if (!side) { return; }
+            var toggle = side.querySelector('[class*="toggle"]');
+            if (toggle) { toggle.click(); }
+          }
 
           var scheduled = false;
           function schedule() {
@@ -175,6 +199,8 @@ struct WebPane: NSViewRepresentable {
           document.addEventListener('DOMContentLoaded', apply);
           window.addEventListener('load', apply);
           new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+          // 折叠/展开只改样式，不产生结构变化，观察器收不到，所以再加一层低频轮询。
+          setInterval(apply, 600);
         })();
         """
         return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
