@@ -496,6 +496,9 @@ struct WebPane: NSViewRepresentable {
               // 给标题行让出交通灯的位置。
               '[data-sidebar-right-panel="fullscreen"] [class*="tabTitle"]'
                 + '{margin-left:76px !important}',
+              // 全屏时标签条也整条让开交通灯。
+              '[data-sidebar-right-panel="fullscreen"] [data-sidebar-right-tab]'
+                + ':first-child{margin-left:76px !important}',
               // 探测菜单项时把网页弹出层藏住：只读 DOM，不让人看见它闪一下。
               'html.whaless-menu-probe [role="menu"]'
                 + '{visibility:hidden !important}',
