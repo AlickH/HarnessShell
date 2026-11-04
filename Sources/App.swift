@@ -13,11 +13,21 @@ struct WhalessApp: App {
             RootView(model: model)
                 .frame(minWidth: 760, minHeight: 500)
                 .onAppear { model.start() }
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            model.toggleSidebar()
+                        } label: {
+                            Image(systemName: "sidebar.left")
+                        }
+                        .buttonStyle(.glass)
+                        .help("收起 / 展开侧边栏")
+                    }
+                }
                 .background(WindowAccessor { model.adopt($0) })
         }
         .defaultSize(width: 1200, height: 840)
-        // 去掉标题栏：内容铺到窗口边缘，红绿灯浮在页面之上。
-        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         MenuBarExtra {
             Text(model.isReady ? "内核运行中" : "正在启动…")
             Divider()
@@ -73,6 +83,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             guard let window = NSApp.windows.first else { return }
+            let items = window.toolbar?.items.map { item -> String in
+                guard let view = item.view else { return "no-view" }
+                let f = view.convert(view.bounds, to: nil)   // 窗口坐标系（底原点）
+                let top = window.frame.height - f.maxY
+                return "x=\(Int(f.minX)) top=\(Int(top)) \(Int(f.width))x\(Int(f.height))"
+            }.joined(separator: " | ") ?? "-"
+            ShellLog.write("toolbar: exists=\(window.toolbar != nil) items=[\(items)]")
+            if let close = window.standardWindowButton(.closeButton) {
+                let inWindow = close.convert(close.bounds, to: nil)
+                let bar = window.contentLayoutRect
+                ShellLog.write("geo: win=\(Int(window.frame.height))x\(Int(window.frame.width))"
+                    + " content=\(Int(bar.height))x\(Int(bar.width))"
+                    + " close=\(Int(inWindow.minX)),\(Int(window.frame.height - inWindow.maxY))"
+                    + " \(Int(inWindow.width))x\(Int(inWindow.height))")
+            }
             ShellLog.write("window: tabs=\(window.tabbingMode == .disallowed ? "off" : "on") "
                 + "fullSize=\(window.styleMask.contains(.fullSizeContentView)) "
                 + "transparentTitlebar=\(window.titlebarAppearsTransparent) "
@@ -109,18 +134,6 @@ struct RootView: View {
             switch model.phase {
             case .ready(let url):
                 WebPane(url: url, model: model)
-                    .ignoresSafeArea()
-                    // 左上角这一条：交通灯（原生，浮在页面之上）→ 拖拽区 → 原生侧栏开关。
-                    // 开关按交通灯右侧对齐（灯占到 x≈81），web 端自己的折叠按钮已被隐藏。
-                    .overlay(alignment: .topLeading) {
-                        HStack(spacing: 0) {
-                            DragStrip()
-                                .frame(width: 86, height: 28)
-                            SidebarToggle { model.toggleSidebar() }
-                                .frame(width: 28, height: 28)
-                        }
-                        .padding(.top, 4)
-                    }
             case .starting(let detail):
                 StatusView(title: "正在启动 Harness",
                            detail: detail,

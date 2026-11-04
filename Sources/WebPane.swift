@@ -16,9 +16,7 @@ struct WebPane: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
 
-        // 标题栏被隐藏后内容铺到最上面，给 #root 让出红绿灯的高度：
-        // 上面那条就露出页面自己的背景色（body 的 #fff / #151517），看起来是同一个界面。
-        configuration.userContentController.addUserScript(Self.titlebarScript(inset: 28))
+        configuration.userContentController.addUserScript(Self.sidebarScript())
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -67,81 +65,39 @@ struct WebPane: NSViewRepresentable {
     ///
     /// 类名带 CSS Modules 的哈希前缀（`pI_x6G_sidebarCol`），所以按后缀匹配；
     /// 万一将来改了名，退回到给 `#root` 加内距（会露出 body 底色，但至少不会压住按钮）。
-    /// 页面这一侧的职责只剩两件事：把 web 自己的折叠按钮藏起来，折叠后别让窄条露出来。
-    /// 展开/收起由 SwiftUI 那个原生按钮触发（它 JS `.click()` 这个隐藏按钮）。
-    private static func titlebarScript(inset: CGFloat) -> WKUserScript {
+    /// 页面这一侧只剩两件事：把 web 自己的折叠按钮藏起来、折叠后别让那条窄栏露出来。
+    /// 展开/收起由标题栏的 SwiftUI 工具栏按钮触发（它 JS `.click()` 这个隐藏按钮）。
+    /// 标题栏是原生的，内容不再压到交通灯下面，所以不需要任何 padding 补偿。
+    private static func sidebarScript() -> WKUserScript {
         let source = """
         (function () {
-          var inset = \(Int(inset));
-          // 折叠后主栏顶到最左边，顶栏要给交通灯 + 原生按钮让位
-          var RAIL_PAD = 64;
-
           function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
-          function columns() { return document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]'); }
 
           function injectStyle() {
             if (document.getElementById('whaless-style')) { return; }
             var style = document.createElement('style');
             style.id = 'whaless-style';
-            style.textContent = [
-              // 用 visibility 而不是 display：元素还在 DOM 里，JS .click() 照样触发它的事件
-              '[class*="sidebarCol"] [class*="toggle"]{visibility:hidden !important}',
-              'html.whaless-rail [class*="centerCol"] > :first-child{padding-left:' + RAIL_PAD + 'px !important}'
-            ].join('');
+            // visibility 而不是 display：元素还在 DOM 里，JS .click() 照样触发它的事件
+            style.textContent = '[class*="sidebarCol"] [class*="toggle"]{visibility:hidden !important}';
             (document.head || document.documentElement).appendChild(style);
-          }
-
-          function setPad(node, px) {
-            if (px === 0) {
-              node.style.removeProperty('padding-top');
-              node.style.removeProperty('box-sizing');
-              return;
-            }
-            if (getComputedStyle(node).paddingTop === px + 'px') { return; }
-            node.style.setProperty('padding-top', px + 'px', 'important');
-            node.style.setProperty('box-sizing', 'border-box', 'important');
-          }
-
-          var rootStyled = false;
-          function clearRoot() {
-            var root = document.getElementById('root');
-            if (!root || !rootStyled) { return; }
-            root.style.removeProperty('padding-top');
-            root.style.removeProperty('box-sizing');
-            rootStyled = false;
           }
 
           function apply() {
             injectStyle();
             var side = sidebar();
-            var cols = columns();
-            if (!side && !cols.length) {
-              var root = document.getElementById('root');
-              if (!root || rootStyled) { return; }
-              root.style.setProperty('padding-top', inset + 'px', 'important');
-              root.style.setProperty('box-sizing', 'border-box', 'important');
-              rootStyled = true;
-              return;
-            }
-            clearRoot();
-            for (var i = 0; i < cols.length; i++) { setPad(cols[i], 0); }
             if (!side) { return; }
-
             var width = side.getBoundingClientRect().width;
             if (width > 0 && width < 200) {
               // 折叠态：应用把它收成 56px 窄条，主栏宽度按这 56px 算的，占位不能动，
-              // 只让这条窄栏看不见。按钮由原生那边提供，所以这里不需要再挪 DOM。
+              // 只让这条窄栏看不见。
               side.style.setProperty('visibility', 'hidden', 'important');
               side.style.setProperty('background', 'transparent', 'important');
               document.documentElement.classList.add('whaless-rail');
               return;
             }
-
-            // 展开态：侧栏整列保留 28px 内距，logo 不钻到交通灯下面
             side.style.removeProperty('visibility');
             side.style.removeProperty('background');
             document.documentElement.classList.remove('whaless-rail');
-            setPad(side, inset);
           }
 
           var scheduled = false;
@@ -241,16 +197,11 @@ struct WebPane: NSViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     webView.evaluateJavaScript("""
                         (function () {
-                          var root = document.getElementById('root');
                           var side = document.querySelector('[class*="sidebarCol"]');
                           var m = document.querySelector('[class*="centerCol"]');
                           function w(el) { return el ? Math.round(el.getBoundingClientRect().width) : '-'; }
-                          var text = document.body ? document.body.innerText.split(String.fromCharCode(10)).join(' ').slice(0, 40) : '-';
-                          return 'url=' + location.href.slice(0, 46) + ' title=' + document.title
-                            + ' htmlLen=' + document.documentElement.outerHTML.length
-                            + ' root=' + (root ? root.children.length : -1)
-                            + ' side=' + w(side) + ' center=' + w(m)
-                            + ' txt=' + text;
+                          return 'side=' + w(side) + ' center=' + w(m)
+                            + ' rail=' + (document.documentElement.classList.contains('whaless-rail') ? '1' : '0');
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")

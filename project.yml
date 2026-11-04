@@ -2,7 +2,8 @@ name: Whaless
 options:
   bundleIdPrefix: com.alick
   deploymentTarget:
-    macOS: "14.0"
+    # 26 起才有 .buttonStyle(.glass)：液态玻璃按钮是本项目的要求
+    macOS: "26.0"
   createIntermediateGroups: true
 
 settings:
