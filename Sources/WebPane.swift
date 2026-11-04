@@ -214,6 +214,28 @@ struct WebPane: NSViewRepresentable {
             }
             return true;
           }
+          // 「新会话」胶囊：只要位置/尺寸，宽度在原生那边按 sidebarWidth 实时算。
+          var lastNewSessionSent = '';
+          function reportNewSession() {
+            var el = document.querySelector(
+              '[class*="sidebarCol"]:not([data-whaless-ghost]) [class*="newSession"]');
+            var data = null;
+            if (el) {
+              var r = el.getBoundingClientRect();
+              if (r.width > 0 && r.height > 0) {
+                data = [Math.round(r.left), Math.round(r.top),
+                        Math.round(r.height)];
+              }
+            }
+            var key = JSON.stringify(data);
+            if (key === lastNewSessionSent) { return; }
+            lastNewSessionSent = key;
+            try {
+              window.webkit.messageHandlers.whaless
+                .postMessage({ newSession: data });
+            } catch (e) {}
+          }
+
           function reportRightButtons() {
             var panel = document.querySelector('[data-sidebar-right-panel]');
             var showPanelButtons = panelSettled(panel);
@@ -284,6 +306,10 @@ struct WebPane: NSViewRepresentable {
               '[class*="sidebar"] [class*="toggle"]{visibility:hidden !important}',
               // 右侧栏的三个按钮改由原生液态玻璃圆钮接管（展开 / 全屏 / 收起）。
               // 同样用 visibility：元素还在 DOM 里，原生按钮 .click() 调同一个事件。
+              // 侧栏里的「新会话」由原生玻璃胶囊接管（位置/宽度跟侧栏走）。
+              // 排除复制品：收放动画时快照里要保持原样。
+              '[class*="sidebarCol"]:not([data-whaless-ghost]) [class*="newSession"]'
+                + '{visibility:hidden !important}',
               '[data-sidebar-right-expand],'
                 + '[data-sidebar-right-mode],'
                 + '[data-sidebar-right-toggle],'
@@ -563,6 +589,7 @@ struct WebPane: NSViewRepresentable {
             if (animating()) { return; }
             report(list);
             reportRightButtons();
+            reportNewSession();
             watch(list);
             for (var k = 0; k < list.length; k++) {
               var el = list[k];
@@ -998,6 +1025,9 @@ struct WebPane: NSViewRepresentable {
             }
             if let buttons = body["rightButtons"] as? [String: Any] {
                 model.reportRightButtons(buttons)
+            }
+            if let newSession = body["newSession"] as? [NSNumber] {
+                model.reportNewSession(newSession)
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
                 model.reportTheme(dark: dark)

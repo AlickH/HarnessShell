@@ -60,6 +60,10 @@ final class ShellModel: ObservableObject {
 
     func beginToggle() {
         let target: CGFloat = sidebarCollapsed ? lastExpandedWidth : 56
+        sidebarAnimating = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.sidebarAnimating = false
+        }
         toggleAnimUntil = Date().addingTimeInterval(0.36)
         withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
             sidebarCollapsed = !sidebarCollapsed
@@ -178,6 +182,9 @@ final class ShellModel: ObservableObject {
         case "mode": selector = "[data-sidebar-right-mode]"
         case "collapse": selector = "[data-sidebar-right-toggle]"
         case "split": selector = "[data-dockkit-split-button]"
+        case "newSession":
+            selector = "[class*=\"sidebarCol\"]:not([data-whaless-ghost])"
+                + " [class*=\"newSession\"]"
         default: return
         }
         // 点完连着刷几次 apply：面板开合有自己的动画，等它落位按钮再原地出来。
@@ -188,6 +195,18 @@ final class ShellModel: ObservableObject {
             let result = value as? String ?? error?.localizedDescription ?? "-"
             ShellLog.write("right button " + id + ": " + result)
         }
+    }
+
+    /// 侧栏里「新会话」按钮的位置/高度（宽度按 sidebarWidth 实时算）。
+    /// 网页那颗被隐藏，这里画成原生液态玻璃胶囊。
+    @Published private(set) var newSessionTop: CGFloat?
+    @Published private(set) var newSessionHeight: CGFloat = 38
+    @Published private(set) var sidebarAnimating = false
+
+    func reportNewSession(_ pair: [NSNumber]) {
+        guard pair.count == 3 else { return }
+        newSessionTop = CGFloat(truncating: pair[1])
+        newSessionHeight = CGFloat(truncating: pair[2])
     }
 
     /// 右上角那颗固定的右侧栏开关：开着就收起，收着就展开。

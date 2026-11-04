@@ -16,6 +16,9 @@ struct WhalessApp: App {
                 .overlay(alignment: .topLeading) {
                     TopButtons(model: model)
                 }
+                .overlay(alignment: .topLeading) {
+                    NewSessionCapsule(model: model)
+                }
                 .overlay(alignment: .topTrailing) {
                     RightButtonsRow(model: model)
                 }
@@ -210,6 +213,35 @@ private struct VibrancyBackdrop: NSViewRepresentable {
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         (view as? BackdropEffectView)?.onAppearanceChange = onAppearanceChange
+    }
+}
+
+/// 侧栏顶部的「新会话」：原生液态玻璃胶囊，盖在网页那颗（已隐藏）的位置上。
+/// 宽度跟着侧栏宽度实时变，收放动画期间交给快照显示，自己先退场。
+private struct NewSessionCapsule: View {
+    @ObservedObject var model: ShellModel
+
+    var body: some View {
+        if let top = model.newSessionTop,
+           !model.sidebarAnimating,
+           model.sidebarWidth >= 200 {
+            let width = max(120, model.sidebarWidth - 24)
+            Button {
+                model.clickPageButton("newSession")
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .medium))
+                    Text("新会话")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .frame(width: width, height: model.newSessionHeight)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .offset(x: 12, y: top)
+            .allowsHitTesting(true)
+        }
     }
 }
 
