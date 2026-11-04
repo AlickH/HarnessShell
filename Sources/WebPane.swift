@@ -546,11 +546,11 @@ struct WebPane: NSViewRepresentable {
                 + 'color-mix(in srgb,var(--dsw-specific-sidebar-fill) 50%,transparent)'
                 + ' !important}',
               '[class*="sidebarCol"] > * > *{background:transparent !important}',
-              // 内容区必须自己铺底：frame 为了让侧栏透玻璃已经透明了，而 web 模式下
-              // centerCol/bottomRow 自己不带背景（上游只在 darwin 分支给它们上色）。
-              // 不补的话像插件页这种内容容器也不画底的页面就会整个透出来。
-              '[class*="centerCol"],[class*="bottomRow"],[class*="rightbarCol"]'
-                + '{background:var(--dsw-alias-bg-base) !important}',
+              // 内容区不再由网页铺底：底色改由原生 ContentBackplate 铺在 WebView 下面
+              // （同一个系统色），这样原生玻璃层才有地方透出来。
+              '[class*="centerCol"],[class*="bottomRow"]'
+                + '{background:transparent !important}',
+              '[class*="rightbarCol"]{background:var(--dsw-alias-bg-base) !important}',
               // 会话列表底部那条渐隐是"渐隐到侧栏实色底"的：侧栏改玻璃之后它
               // 会变成一条盖住材质的实色条，直接去掉（列表本身滚动不受影响）。
               '[class*="sidebarCol"] [class*="_fade"]{display:none !important}',
