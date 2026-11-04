@@ -187,6 +187,33 @@ struct WebPane: NSViewRepresentable {
             } catch (e) {}
           }
 
+          // 右侧栏三个按钮：位置和状态报给原生，由原生画液态玻璃圆钮。
+          // 只在静止态量（动画/拖拽里 apply 已经提前返回，不会为此强制布局）。
+          var lastButtonsSent = '';
+          function rectCenter(sel) {
+            var el = document.querySelector(sel);
+            if (!el) { return null; }
+            var r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) { return null; }
+            return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)];
+          }
+          function reportRightButtons() {
+            var panel = document.querySelector('[data-sidebar-right-panel]');
+            var data = {
+              expand: rectCenter('[data-sidebar-right-expand]'),
+              mode: rectCenter('[data-sidebar-right-mode]'),
+              collapse: rectCenter('[data-sidebar-right-toggle]'),
+              fullscreen: !!(panel
+                && panel.getAttribute('data-sidebar-right-panel') === 'fullscreen')
+            };
+            var key = JSON.stringify(data);
+            if (key === lastButtonsSent) { return; }
+            lastButtonsSent = key;
+            try {
+              window.webkit.messageHandlers.whaless.postMessage({ rightButtons: data });
+            } catch (e) {}
+          }
+
           // 侧栏状态上报：原生按钮的位置和显隐都靠它。
           // 折叠动画 0.3s 期间会连发一串，有 lastSent 去重，静止时一条也不发。
           var lastSent = '';
@@ -231,6 +258,11 @@ struct WebPane: NSViewRepresentable {
             style.textContent = [
               '[class*="sidebarCol"] [class*="toggle"]{visibility:hidden !important}',
               '[class*="sidebar"] [class*="toggle"]{visibility:hidden !important}',
+              // 右侧栏的三个按钮改由原生液态玻璃圆钮接管（展开 / 全屏 / 收起）。
+              // 同样用 visibility：元素还在 DOM 里，原生按钮 .click() 调同一个事件。
+              '[data-sidebar-right-expand],'
+                + '[data-sidebar-right-mode],'
+                + '[data-sidebar-right-toggle]{visibility:hidden !important}',
               // 无标题栏下，侧栏内容要往下让出交通灯 + 两个液态玻璃按钮那一行。
               '[class*="sidebarCol"]{padding-top:50px !important;box-sizing:border-box !important;}',
               // ---- 侧栏毛玻璃：页面只负责"别把材质盖住" ----
@@ -505,6 +537,7 @@ struct WebPane: NSViewRepresentable {
             // querySelectorAll + getBoundingClientRect + 跨进程 postMessage。
             if (animating()) { return; }
             report(list);
+            reportRightButtons();
             watch(list);
             for (var k = 0; k < list.length; k++) {
               var el = list[k];
@@ -937,6 +970,9 @@ struct WebPane: NSViewRepresentable {
             if let log = body["log"] as? String {
                 ShellLog.write(log)
                 return
+            }
+            if let buttons = body["rightButtons"] as? [String: Any] {
+                model.reportRightButtons(buttons)
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
                 model.reportTheme(dark: dark)

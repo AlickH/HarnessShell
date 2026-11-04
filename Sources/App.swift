@@ -16,6 +16,9 @@ struct WhalessApp: App {
                 .overlay(alignment: .topLeading) {
                     TopButtons(model: model)
                 }
+                .overlay(alignment: .topLeading) {
+                    PageChromeButtons(model: model)
+                }
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
                 .ignoresSafeArea()
@@ -207,6 +210,49 @@ private struct VibrancyBackdrop: NSViewRepresentable {
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         (view as? BackdropEffectView)?.onAppearanceChange = onAppearanceChange
+    }
+}
+
+/// 右侧栏那三个入口的液态玻璃版本：位置由网页上报，点击回点网页里被隐藏的按钮。
+private struct PageChromeButtons: View {
+    @ObservedObject var model: ShellModel
+
+    private func symbol(for id: String) -> String {
+        switch id {
+        case "expand": return "sidebar.right"
+        case "mode":
+            return model.pageRightFullscreen
+                ? "arrow.down.right.and.arrow.up.left"
+                : "arrow.up.left.and.arrow.down.right"
+        default: return "sidebar.right"
+        }
+    }
+
+    private func help(for id: String) -> String {
+        switch id {
+        case "expand": return "展开右侧栏"
+        case "mode": return model.pageRightFullscreen ? "退出全屏" : "全屏"
+        default: return "收起右侧栏"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(model.pageButtons, id: \.id) { button in
+                Button {
+                    model.clickPageButton(button.id)
+                } label: {
+                    Image(systemName: symbol(for: button.id))
+                        .frame(width: 28, height: 28)
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .help(help(for: button.id))
+                .offset(x: button.x - 14, y: button.y - 14)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

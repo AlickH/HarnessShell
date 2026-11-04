@@ -149,6 +149,50 @@ final class ShellModel: ObservableObject {
         self.webView = webView
     }
 
+    /// 页面右上角/右侧栏的三个按钮（展开右侧栏、全屏、收起）在窗口里的中心点。
+    /// 网页里这三个按钮被 visibility 隐藏，由原生画成液态玻璃圆钮，点击再回点它们。
+    struct PageButton: Equatable {
+        var id: String
+        var x: CGFloat
+        var y: CGFloat
+    }
+
+    @Published private(set) var pageButtons: [PageButton] = []
+    @Published private(set) var pageRightFullscreen = false
+
+    func reportRightButtons(_ raw: [String: Any]) {
+        func point(_ key: String) -> PageButton? {
+            guard let pair = raw[key] as? [NSNumber], pair.count == 2 else { return nil }
+            return PageButton(id: key, x: CGFloat(truncating: pair[0]),
+                              y: CGFloat(truncating: pair[1]))
+        }
+        var next: [PageButton] = []
+        if let b = point("expand") { next.append(b) }
+        if let b = point("mode") { next.append(b) }
+        if let b = point("collapse") { next.append(b) }
+        let full = (raw["fullscreen"] as? NSNumber)?.boolValue ?? false
+        if next != pageButtons { pageButtons = next }
+        if full != pageRightFullscreen { pageRightFullscreen = full }
+    }
+
+    /// 原生玻璃按钮点下去：回点网页里对应那个（已隐藏但可点的）按钮。
+    func clickPageButton(_ id: String) {
+        guard let webView else { return }
+        let selector: String
+        switch id {
+        case "expand": selector = "[data-sidebar-right-expand]"
+        case "mode": selector = "[data-sidebar-right-mode]"
+        case "collapse": selector = "[data-sidebar-right-toggle]"
+        default: return
+        }
+        webView.evaluateJavaScript(
+            "(function(){var b=document.querySelector('" + selector
+            + "'); if(b){b.click(); return 'ok';} return 'none';})()") { value, error in
+            let result = value as? String ?? error?.localizedDescription ?? "-"
+            ShellLog.write("right button " + id + ": " + result)
+        }
+    }
+
     /// 把 macOS 的系统内容底色推给页面：`NSColor.textBackgroundColor` 按当前外观
     /// 解析成 sRGB（暗色 #1E1E1E / 亮色 #FFFFFF），这是真正的系统色，
     /// 不是壳或 Harness 主题里写死的亮/暗值。
