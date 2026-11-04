@@ -49,86 +49,23 @@ struct WebPane: NSViewRepresentable {
         let source = """
         (function () {
           var inset = \(Int(inset));
-          var HIDDEN = 'whaless-side-hidden';
           var TOOLBAR = 'whaless-toolbar';
+          var RAIL_FLAG = 'whalessRail';
+
+          function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
+          function center() { return document.querySelector('[class*="centerCol"]'); }
+          function columns() { return document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]'); }
 
           function injectStyle() {
             if (document.getElementById('whaless-style')) { return; }
             var style = document.createElement('style');
             style.id = 'whaless-style';
-            style.textContent = [
-              '#' + TOOLBAR + '{position:fixed;left:84px;top:5px;display:none;gap:2px;z-index:2147483647}',
-              '#' + TOOLBAR + ' button{width:24px;height:24px;display:flex;align-items:center;justify-content:center;',
-              'border:0;background:transparent;border-radius:6px;color:currentColor;opacity:.55;cursor:default;padding:0}',
-              '#' + TOOLBAR + ' button:hover{background:rgba(127,127,127,.18);opacity:1}',
-              '#' + TOOLBAR + ' svg{width:15px;height:15px;display:block}',
-              // 侧栏隐藏后主区顶栏会顶到最左边，给它让出交通灯的位置
-              'html.' + HIDDEN + ' [class*="centerCol"] > :first-child{padding-left:84px !important}'
-            ].join('');
+            style.textContent =
+              // 只定位容器：里面装的是应用自己按钮的克隆，不能覆盖它的样式
+              '#' + TOOLBAR + '{position:fixed;left:84px;top:5px;display:none;align-items:center;z-index:2147483647}'
+              // 折叠后主栏顶到最左边，给它让开交通灯
+              + 'html.whaless-rail [class*="centerCol"] > :first-child{padding-left:28px !important}';
             (document.head || document.documentElement).appendChild(style);
-          }
-
-          function sidebar() { return document.querySelector('[class*="sidebarCol"]'); }
-
-          function icon(path) {
-            return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" '
-              + 'stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';
-          }
-
-          function makeButton(glyph, label, action) {
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.title = label;
-            button.setAttribute('aria-label', label);
-            button.innerHTML = glyph;
-            button.addEventListener('click', function (event) {
-              event.preventDefault();
-              event.stopPropagation();
-              action();
-            });
-            return button;
-          }
-
-          function toolbar() {
-            var existing = document.getElementById(TOOLBAR);
-            if (existing) { return existing; }
-            var bar = document.createElement('div');
-            bar.id = TOOLBAR;
-            // 侧栏图标 + 新会话
-            bar.appendChild(makeButton(icon('<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/>'),
-              '显示侧栏', function () { expandSidebar(); }));
-            bar.appendChild(makeButton(icon('<path d="M8 3.5v9M3.5 8h9"/>'),
-              '新会话', function () {
-                var target = document.querySelector('[class*="newSession"]');
-                if (target) { target.click(); }
-              }));
-            document.body.appendChild(bar);
-            return bar;
-          }
-
-          // 侧栏"展开 → 窄条"是应用自己的状态机（它会据此重算主栏宽度）。
-          // 所以不去硬藏：让它先折成窄条，再把窄条抹掉并把主栏拉满；
-          // 恢复时反过来——把标记清掉、让它自己展开。
-          var RAIL_FLAG = 'whalessRail';
-
-          function center() { return document.querySelector('[class*="centerCol"]'); }
-
-          // 只做"视觉消失"：宽度不动。
-          // 主栏宽度是应用按"侧栏占多少"算出来的（实测 win-56），我们把它改 0 只会让
-          // 主栏少算 56px、右边留一条空白。所以保留占位，只把这一条画成透明。
-          function smoothRail(side) {
-            [['opacity', '0'], ['background', 'transparent'], ['border-color', 'transparent'],
-             ['box-shadow', 'none'], ['pointer-events', 'none']].forEach(function (pair) {
-              side.style.setProperty(pair[0], pair[1], 'important');
-            });
-            document.documentElement.classList.add(HIDDEN);
-            toolbar().style.display = 'flex';
-          }
-
-          function restoreRail(side) {
-            ['opacity', 'background', 'border-color', 'box-shadow', 'pointer-events']
-              .forEach(function (name) { side.style.removeProperty(name); });
-            toolbar().style.display = 'none';
           }
 
           function setPad(node, px) {
@@ -151,11 +88,66 @@ struct WebPane: NSViewRepresentable {
             rootStyled = false;
           }
 
+          function toolbar() {
+            var bar = document.getElementById(TOOLBAR);
+            if (bar) { return bar; }
+            bar = document.createElement('div');
+            bar.id = TOOLBAR;
+            document.body.appendChild(bar);
+            return bar;
+          }
+
+          /// 折叠后显示应用自己那个折叠按钮（克隆），图标和悬停都是原生的。
+          function showToggleInToolbar() {
+            var bar = toolbar();
+            var side = sidebar();
+            var source = side && side.querySelector('[class*="toggle"]');
+            bar.textContent = '';
+            if (source) {
+              var clone = source.cloneNode(true);
+              clone.style.removeProperty('transform');
+              clone.style.setProperty('position', 'static', 'important');
+              clone.style.setProperty('margin', '0', 'important');
+              clone.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                expandSidebar();
+              });
+              bar.appendChild(clone);
+            }
+            bar.style.display = 'flex';
+          }
+
+          function expandSidebar() {
+            var side = sidebar();
+            if (!side) { return; }
+            var toggle = side.querySelector('[class*="toggle"]');
+            if (toggle) { toggle.click(); }
+          }
+
+          /// 只做视觉隐藏：宽度不动，否则主栏会少算这一条（实测 win-56）。
+          function hideRail(side) {
+            [['opacity', '0'], ['background', 'transparent'], ['border-color', 'transparent'],
+             ['box-shadow', 'none'], ['pointer-events', 'none']].forEach(function (pair) {
+              side.style.setProperty(pair[0], pair[1], 'important');
+            });
+            document.documentElement.classList.add('whaless-rail');
+            showToggleInToolbar();
+          }
+
+          function showRail(side) {
+            ['opacity', 'background', 'border-color', 'box-shadow', 'pointer-events']
+              .forEach(function (name) { side.style.removeProperty(name); });
+            document.documentElement.classList.remove('whaless-rail');
+            var bar = document.getElementById(TOOLBAR);
+            if (bar) { bar.style.display = 'none'; }
+          }
+
           function apply() {
             injectStyle();
-            var center = document.querySelectorAll('[class*="centerCol"],[class*="rightbarCol"]');
+            var centerColumns = columns();
             var side = sidebar();
-            if (!center.length && !side) {
+            if (!centerColumns.length && !side) {
               var root = document.getElementById('root');
               if (!root || rootStyled) { return; }
               root.style.setProperty('padding-top', inset + 'px', 'important');
@@ -164,28 +156,26 @@ struct WebPane: NSViewRepresentable {
               return;
             }
             clearRoot();
-            for (var i = 0; i < center.length; i++) { setPad(center[i], 0); }
-            if (side) {
-              var width = side.getBoundingClientRect().width;
-              if (side.dataset[RAIL_FLAG] === '1') {
-                smoothRail(side);                       // 已经抹掉了，保持
-              } else if (width > 0 && width < 200) {
-                side.dataset[RAIL_FLAG] = '1';          // 刚折成窄条：抹掉并拉满主栏
-                smoothRail(side);
-              } else if (width >= 200) {
-                delete side.dataset[RAIL_FLAG];         // 又展开了
-                restoreRail(side);
-              }
-              setPad(side, 0);
-            }
-          }
-
-          // 恢复按钮：点窄条上那个（已经看不见的）折叠按钮，让它自己展开。
-          function expandSidebar() {
-            var side = sidebar();
+            for (var i = 0; i < centerColumns.length; i++) { setPad(centerColumns[i], 0); }
             if (!side) { return; }
+
+            // 整列保持原位（28px 内距），只把折叠按钮抬到与交通灯齐平
+            setPad(side, inset);
             var toggle = side.querySelector('[class*="toggle"]');
-            if (toggle) { toggle.click(); }
+            if (toggle && !side.dataset[RAIL_FLAG]) {
+              toggle.style.setProperty('transform', 'translateY(-' + inset + 'px)', 'important');
+            }
+
+            var width = side.getBoundingClientRect().width;
+            if (side.dataset[RAIL_FLAG] === '1') {
+              hideRail(side);
+            } else if (width > 0 && width < 200) {
+              side.dataset[RAIL_FLAG] = '1';
+              hideRail(side);
+            } else if (width >= 200) {
+              if (side.dataset[RAIL_FLAG] !== undefined) { delete side.dataset[RAIL_FLAG]; }
+              showRail(side);
+            }
           }
 
           var scheduled = false;
@@ -199,10 +189,11 @@ struct WebPane: NSViewRepresentable {
           document.addEventListener('DOMContentLoaded', apply);
           window.addEventListener('load', apply);
           new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
-          // 折叠/展开只改样式，不产生结构变化，观察器收不到，所以再加一层低频轮询。
+          // 折叠只改样式不产生结构变化，观察器收不到，补一层低频轮询。
           setInterval(apply, 600);
         })();
         """
+
         return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 
@@ -285,16 +276,15 @@ struct WebPane: NSViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     webView.evaluateJavaScript("""
                         (function () {
-                          var col = document.querySelector('[class*="sidebarCol"]');
-                          var text = document.body ? document.body.innerText.slice(0, 30) : '';
-                          var sideEl = document.querySelector('[class*="sidebarCol"]');
+                          var side = document.querySelector('[class*="sidebarCol"]');
                           var center = document.querySelector('[class*="centerCol"]');
-                          var first = center && center.firstElementChild
-                            ? Math.round(center.firstElementChild.getBoundingClientRect().top) : '-';
-                          return 'pad(side)=' + (sideEl ? getComputedStyle(sideEl).paddingTop : '-')
-                            + ' w=' + (sideEl ? Math.round(sideEl.getBoundingClientRect().width) : '-')
-                            + ' pad(center)=' + (center ? getComputedStyle(center).paddingTop : '-')
-                            + ' centerTop=' + first + ' | ' + text;
+                          var toggle = side && side.querySelector('[class*="toggle"]');
+                          function top(el) { return el ? Math.round(el.getBoundingClientRect().top) : '-'; }
+                          return 'pad(side)=' + (side ? getComputedStyle(side).paddingTop : '-')
+                            + ' toggleY=' + top(toggle)
+                            + ' centerTop=' + (center && center.firstElementChild
+                                ? Math.round(center.firstElementChild.getBoundingClientRect().top) : '-')
+                            + ' rail=' + (side && side.dataset.whalessRail ? '1' : '0');
                         })()
                         """) { value, _ in
                         let text = (value as? String ?? "-").replacingOccurrences(of: "\n", with: " ")
