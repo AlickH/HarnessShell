@@ -19,7 +19,10 @@ struct WhalessApp: App {
                 // 必须放在 overlay 之后：让整棵视图（含 overlay）都忽略标题栏安全区，
                 // 这样 overlay 的 topLeading 才锚定到窗口绝对顶部，跟交通灯同一行。
                 .ignoresSafeArea()
-                .preferredColorScheme(model.pageDark ? .dark : .light)
+                // 页面明确选了亮/暗才把窗口外观钉过去；选的是"跟随系统"就放开，
+                // 否则会把网页的 prefers-color-scheme 一起钉死，系统切亮暗不生效。
+                .preferredColorScheme(model.pageThemeSource == "system"
+                    ? nil : (model.pageDark ? .dark : .light))
                 .background(WindowAccessor { model.adopt($0) })
         }
         .defaultSize(width: 1200, height: 840)

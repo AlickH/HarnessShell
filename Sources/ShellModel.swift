@@ -50,8 +50,12 @@ final class ShellModel: ObservableObject {
             ?? (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
     }
 
+    /// 页面主题来源："system" 表示跟随系统（此时窗口外观别钉死），"light"/"dark" 是明确选择。
+    @Published private(set) var pageThemeSource = ""
+
     /// web 端已经把 theme 单独上报过来了（不依赖侧栏渲染，页面一挂就报）。
-    func reportTheme(dark: Bool) {
+    func reportTheme(dark: Bool, source: String) {
+        if pageThemeSource != source { pageThemeSource = source }
         guard pageDark != dark else { return }
         pageDark = dark
         UserDefaults.standard.set(dark, forKey: Self.pageDarkKey)

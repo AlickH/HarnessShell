@@ -142,11 +142,15 @@ struct WebPane: NSViewRepresentable {
             var body = document.body;
             if (!body) { return; }
             var dark = body.hasAttribute('data-ds-dark-theme');
-            var key = dark ? '1' : '0';
+            // 主题是"明确亮/暗"还是"跟随系统"：后者不能再把窗口外观钉死，
+            // 否则系统切亮暗时跑不到网页的 prefers-color-scheme 上。
+            var source = document.documentElement.dataset.dsThemeSource || '';
+            var key = (dark ? '1' : '0') + ':' + source;
             if (key === lastThemeSent) { return; }
             lastThemeSent = key;
             try {
-              window.webkit.messageHandlers.whaless.postMessage({ dark: dark });
+              window.webkit.messageHandlers.whaless.postMessage(
+                { dark: dark, themeSource: source });
             } catch (e) {}
           }
 
@@ -894,7 +898,8 @@ struct WebPane: NSViewRepresentable {
                 return
             }
             if let dark = (body["dark"] as? NSNumber)?.boolValue {
-                model.reportTheme(dark: dark)
+                let source = body["themeSource"] as? String ?? ""
+                model.reportTheme(dark: dark, source: source)
             }
             guard let width = (body["width"] as? NSNumber)?.doubleValue,
                   width > 0 else { return }
