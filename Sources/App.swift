@@ -19,6 +19,9 @@ struct WhalessApp: App {
                 .overlay(alignment: .topLeading) {
                     NewSessionCapsule(model: model)
                 }
+                .overlay(alignment: .topLeading) {
+                    GuideGlassCards(model: model)
+                }
                 .overlay(alignment: .topTrailing) {
                     RightButtonsRow(model: model)
                 }
@@ -307,6 +310,53 @@ private struct SessionHeaderButtons: View {
             .animation(.easeInOut(duration: 0.3), value: right)
             .animation(.easeInOut(duration: 0.3), value: trailingReserve)
         }
+    }
+}
+
+/// 右侧栏引导卡片：原生玻璃卡重绘（图标 + 标题 + 描述），点击回点网页那张卡。
+private struct GuideGlassCards: View {
+    @ObservedObject var model: ShellModel
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(model.guideEntries) { entry in
+                Button {
+                    model.clickGuide(entry.index)
+                } label: {
+                    HStack(spacing: 14) {
+                        Group {
+                            if let icon = entry.icon {
+                                Image(nsImage: icon)
+                                    .resizable()
+                                    .interpolation(.high)
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 26, height: 26)
+                            }
+                        }
+                        .frame(width: 26, height: 26)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entry.title)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary)
+                            if !entry.desc.isEmpty {
+                                Text(entry.desc)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 20)
+                    .frame(width: entry.rect.width, height: entry.rect.height)
+                    .contentShape(RoundedRectangle(cornerRadius: 26))
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
+                .offset(x: entry.rect.minX, y: entry.rect.minY)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
