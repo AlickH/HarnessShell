@@ -438,9 +438,16 @@ struct WebPane: NSViewRepresentable {
             markRightSeen();
             var list = sidebars();
             if (!list.length) { return; }
-            // 拖动中：只把新宽度限流喂给原生，其余侧栏逻辑（轨道显隐、宽度变量等）
-            // 全部让路，省得和应用自己的逐帧重排抢主线程。
+            // 拖动中：宽度要跟着手指实时变 —— 侧栏内容被 `--whaless-sidebar-w`
+            // 钉着（这是动画用的），不更新它内容就停在旧宽度，松手才跳一下。
+            // 其余侧栏逻辑（轨道显隐、两次采样防抖）仍让路；原生按钮限流跟随。
             if (dragging()) {
+              var liveW = Math.round(widest(list));
+              if (liveW >= 200 && liveW !== expandedWidth) {
+                expandedWidth = liveW;
+                document.documentElement.style.setProperty(
+                  '--whaless-sidebar-w', liveW + 'px');
+              }
               var now = performance.now();
               if (now - lastDragReport > 33) {
                 lastDragReport = now;
