@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import WebKit
 
 @main
 struct WhalessApp: App {
@@ -478,11 +479,9 @@ struct DeepySprite: View {
     @State private var bob = false
     private let timer = Timer.publish(every: 0.14, on: .main, in: .common).autoconnect()
 
-    private let states = [
-        "idle", "idle-look", "idle-spout", "thinking", "typing", "music",
-        "conducting", "building", "error", "happy", "notification",
-        "compacting", "sleeping", "waking", "poke-left", "poke-right", "tickle",
-    ]
+    /// 目前只有 idle 的帧参数是验证过的（8 列 × 6 行、帧 176×119）；
+    /// 其余状态的网格各不相同，要等采样到它们运行时的 CSS 变量后再逐个放进来。
+    private let states = ["idle"]
     private let frameXs: [CGFloat] = [6, 196, 386, 575, 765, 955, 1146, 1336]
     private let frameY: CGFloat = 7
     private let frameW: CGFloat = 174
@@ -520,6 +519,22 @@ struct DeepySprite: View {
         }
         return NSImage(contentsOf: url)
     }
+}
+
+/// 启动页的 Deepy：用 WKWebView 加载本地 HTML，CSS 规则和皮肤同构
+/// （`Resources/deepy-splash.html`），这样帧的裁切/缩放完全交给浏览器，
+/// 不会像 SwiftUI 里那样因为网格假设错位而串帧。
+struct DeepySplashView: NSViewRepresentable {
+    func makeNSView(context: Context) -> WKWebView {
+        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        view.setValue(false, forKey: "drawsBackground")
+        if let html = Bundle.main.url(forResource: "deepy-splash", withExtension: "html"),
+           let root = Bundle.main.resourceURL {
+            view.loadFileURL(html, allowingReadAccessTo: root)
+        }
+        return view
+    }
+    func updateNSView(_ view: WKWebView, context: Context) {}
 }
 
 /// 品牌 wordmark：SVG 里填的是 `var(--dsw-alias-label-primary)` 这类变量，

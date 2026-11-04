@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  /* 和 dsh-claude-style 皮肤里 .dsh-claude-deepy-* 的规则完全同构 */
+  .deepy { position: absolute; left: 50%; top: 50%; width: 128px; height: 128px;
+           transform: translate(-50%, -50%); pointer-events: none; }
+  .sprite { position: absolute;
+            left: calc(var(--x, 0) * 2px);
+            top: calc(var(--y, 0) * 2px);
+            width: calc(var(--w, 0) * 2px); }
+  .strip { display: block;
+           width: calc(var(--cellw, 0) * 16px);
+           height: calc(var(--striph, 0) * 2px);
+           background-image: var(--sheet, none);
+           background-repeat: no-repeat;
+           background-size: calc(var(--cellw, 0) * 16px) auto;
+           image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<div class="deepy"><div class="sprite"><div class="strip" id="strip"></div></div></div>
+<script>
+  // 参数来自皮肤运行时（从页面里采样得到），不是猜的。
+  var STATES = {
+    "idle":       { sheet: "deepy/idle.svg",       x: 12, y: 26, w: 36, cellw: 38, striph: 156 },
+    "poke-right": { sheet: "deepy/poke-right.svg", x: 8,  y: 16, w: 44, cellw: 46, striph: 180 },
+    "poke-left":  { sheet: "deepy/poke-left.svg",  x: 1,  y: 16, w: 50, cellw: 52, striph: 180 }
+  };
+  var names = Object.keys(STATES);
+  var state = STATES[names[Math.floor(Math.random() * names.length)]];
+  var sprite = document.querySelector(".sprite");
+  var strip = document.getElementById("strip");
+  var box = document.querySelector(".deepy");
+  document.documentElement.style.setProperty("--sheet", "url(" + state.sheet + ")");
+  document.documentElement.style.setProperty("--x", state.x);
+  document.documentElement.style.setProperty("--y", state.y);
+  document.documentElement.style.setProperty("--w", state.w);
+  document.documentElement.style.setProperty("--cellw", state.cellw);
+  document.documentElement.style.setProperty("--striph", state.striph);
+
+  // 走帧：推进 x，每帧 cellw 的步长（和皮肤里 JS 推进变量的做法一致）。
+  var frame = 0;
+  var FRAMES = 16;
+  setInterval(function () {
+    frame = (frame + 1) % FRAMES;
+    document.documentElement.style.setProperty("--x", state.x + frame * state.cellw);
+  }, 120);
+
+  // 轻微上下浮动（皮肤 CSS 里那层 transform 动画）。
+  var up = true;
+  setInterval(function () {
+    up = !up;
+    box.style.transform = "translate(-50%, " + (up ? -50 : -52) + "%)";
+    box.style.transition = "transform 1.6s ease-in-out";
+  }, 1600);
+</script>
+</body>
+</html>
