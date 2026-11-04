@@ -316,14 +316,12 @@ struct WebPane: NSViewRepresentable {
               //   · 不裁切，让 .frame 的 overflow:hidden 在窗口边缘裁
               // 右侧栏（dsh-client-ui-sidebar-right）是同一套思路的静态版：
               //   transform:translateX(--dsh-sidebar-width) + visibility 延迟关闭。
-              // 分隔线：原来自带那条被去掉过（收放动画时怕它跟着列宽跑），现在侧栏
-              // 是玻璃、分割线由复制品跟着滑，把它按系统语义色补回来 ——
-              // 暗色下是 16% 白、亮色下是 12% 黑，就是 macOS 侧栏那条"有层次的高光边"。
-              // 再加一条 1px 内高光，让玻璃和主栏之间分出层次。
+              // 分隔线就用上游自己的：`.pI_x6G_sidebarCol{border-right:.5px solid
+              // var(--dsw-alias-border-l3)}`（暗色 16% 白 / 亮色 12% 黑）。
+              // 这条之前被 `border-right-width:0` 删掉了，现在按原设计补回来，
+              // 不加额外描边 —— 和桌面端 web 模式下的分割线完全同一条。
               '[class*="sidebarCol"]{overflow:visible !important;'
-                + 'border-right:.5px solid var(--dsw-alias-border-l3) !important;'
-                + 'box-shadow:inset -1px 0 0 color-mix(in srgb,'
-                + 'var(--dsw-alias-border-l3) 60%,transparent) !important}',
+                + 'border-right:.5px solid var(--dsw-alias-border-l3) !important}',
               '[class*="sidebarCol"] > * > *{'
                 + 'width:var(--whaless-sidebar-w,280px) !important;'
                 + 'min-width:var(--whaless-sidebar-w,280px) !important;'
