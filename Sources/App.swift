@@ -467,20 +467,54 @@ struct StatusView: View {
     let retry: (() -> Void)?
     let install: (() -> Void)?
 
+    /// 启动时轮播的提示，一条一条淡入淡出，直到界面加载出来。
+    @State private var tipIndex = 0
+    private let tips = [
+        "正在启动 Harness 内核并加载插件…",
+        "侧栏的分割线可以拖动，调整到你觉得合适的宽度",
+        "右侧栏能放文件、终端和浏览器，⌘T 直接开新标签",
+        "会话里的内容支持 Markdown、代码块和公式渲染",
+        "启动一次之后就快了，内核会缓存已加载的插件",
+    ]
+    private let tipTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
+
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 18) {
+            // 品牌 wordmark（从桌面端 welcome 窗口抽出来的同一份 SVG）。
+            if let url = Bundle.main.url(forResource: "welcome-brand", withExtension: "svg"),
+               let brand = NSImage(contentsOf: url) {
+                Image(nsImage: brand)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 236)
+                    .padding(.bottom, 4)
+            }
             if showsSpinner {
                 ProgressView()
                     .controlSize(.small)
             }
             Text(title)
                 .font(.headline)
+            if showsSpinner {
+                Text(tips[tipIndex % tips.count])
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 460)
+                    .id(tipIndex)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.4), value: tipIndex)
+                    .onReceive(tipTimer) { _ in tipIndex += 1 }
+            } else {
+                Text(detail)
             Text(detail)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-                .frame(maxWidth: 460)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 460)
+            }
 
             HStack(spacing: 10) {
                 if let install {
