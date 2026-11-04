@@ -286,9 +286,15 @@ struct WebPane: NSViewRepresentable {
               // 折叠态：整块平移到窗口外（-100% = 展开宽度，永远对得上）。
               '[data-sidebar-collapsed] [class*="sidebarCol"]:not([data-whaless-ghost]) > * > *'
                 + '{transform:translateX(-100%)}',
-              // 复制品的位移一律由 JS 逐帧写入（内联 !important），这里不能再给
-              // transition，否则每帧的修正会被过渡吞掉、永远追不上主栏。
+              // 复制品的位移交给 CSS 过渡：和真身面板用同一条时长/曲线/位移，
+              // 两者都在合成器上跑 —— 主线程再忙（会话页那种长对话）也不会掉帧，
+              // 也就不会出现"真身顺、复制品一顿一顿"的相对位移。
               '[data-whaless-ghost]{transition:none !important;visibility:visible !important}',
+              '[data-whaless-anim] [data-whaless-ghost]{'
+                + 'transition:transform var(--ds-transition-duration-slow,.3s) '
+                + 'var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1)) !important}',
+              '[data-whaless-ghost][data-whaless-ghost-closed]'
+                + '{transform:translateX(-100%) !important}',
               // 影子 frame（复制品的祖先）只是个"状态冻结器"：几何全部由内联样式给死，
               // 皮肤给它加的装饰（伪元素、背景、边框）一律抹掉，别让它多画东西。
               '[data-whaless-ghost-frame]{transition:none !important;'
@@ -631,38 +637,6 @@ struct WebPane: NSViewRepresentable {
             return shell;
           }
 
-          // 复制品逐帧贴合主栏左缘。CSS 过渡和 grid 列宽过渡虽然参数相同，
-          // 但一个在合成器、一个在主线程，中间会差 1~3px —— 那点偏差就是
-          // "元素被背景切掉一点"。这里每帧读一次真实左缘，差多少补多少。
-          function follow() {
-            if (!anim || !anim.ghost) { return; }
-            try { followBody(); }
-            catch (err) {
-              try {
-                window.webkit.messageHandlers.whaless.postMessage(
-                  { log: 'anim error [follow] ' + (err && err.stack || err) });
-              } catch (x) {}
-              finish();
-            }
-          }
-
-          function followBody() {
-            var c = document.querySelector('[class*="centerCol"]');
-            var left = c ? c.getBoundingClientRect().left : 0;
-            anim.ghost.style.setProperty(
-              'transform', 'translateX(' + (left - expandedWidth) + 'px)', 'important');
-            var still = Math.abs(left - anim.lastLeft) < 0.5;
-            anim.lastLeft = left;
-            anim.still = still ? anim.still + 1 : 0;
-            var elapsed = performance.now() - anim.t0;
-            if ((anim.still >= 3 && elapsed > durMs() * 0.9)
-                || elapsed > durMs() * 1.6 + 200) {
-              finish();
-            } else {
-              anim.raf = requestAnimationFrame(follow);
-            }
-          }
-
           // 真身面板此刻的实际位移。收尾时把复制品摆到同一个值上再撤，
           // 否则"换人"那一帧会差 1~2px —— 就是展开末尾那一下抖动。
           function panelTx() {
@@ -683,7 +657,6 @@ struct WebPane: NSViewRepresentable {
             var a = anim;
             anim = null;
             if (a.timer) { clearTimeout(a.timer); }
-            if (a.raf) { cancelAnimationFrame(a.raf); }
             if (a.frame && a.onEnd) { a.frame.removeEventListener('transitionend', a.onEnd); }
             // 面板自己的 transform 过渡可能比列宽晚一两帧才落位。先等它走完再"换人"：
             // 否则最后一帧真身还停在离终点 1px 的地方，复制品一撤，边缘和原生按钮
@@ -713,8 +686,11 @@ struct WebPane: NSViewRepresentable {
             html.removeAttribute('data-whaless-frozen');
             if (shell && shell.parentNode) {
               shell.parentNode.removeChild(shell);
-              // 收起的快照留着：下一次展开要靠它，否则会滑到一半换内容。
+              // 快照留着：下一次展开要靠它，否则会滑到一半换内容。
+              // 收起方向结束时它已经在窗外；展开方向结束（停在展开位）要复位回窗外，
+              // 否则下次展开没有起点。
               a.ghost.style.removeProperty('transform');
+              a.ghost.setAttribute('data-whaless-ghost-closed', '');
               savedGhost = shell;
             }
             html.removeAttribute('data-whaless-anim');
@@ -732,13 +708,17 @@ struct WebPane: NSViewRepresentable {
               var frame = frameEl();
               var collapsing = !document.querySelector('[data-sidebar-collapsed]');
               anim = { ghost: null, shell: null, frame: frame, timer: 0, onEnd: null,
-                       t0: performance.now(), lastLeft: -1, still: 0, raf: 0,
                        collapsing: collapsing };
               if (collapsing) {
                 // 收起：内容马上要换成图标版，先冻一份。
                 anim.shell = makeGhost();
                 anim.ghost = anim.shell && anim.shell.firstElementChild;
-                if (anim.ghost) { html.setAttribute('data-whaless-frozen', ''); }
+                // 先把"展开态"这一版样式落定（一次强制样式计算，不是每帧），
+                // 之后 afterClick 里加 closed 属性，过渡才有起点。
+                if (anim.ghost) {
+                  void anim.ghost.offsetWidth;
+                  html.setAttribute('data-whaless-frozen', '');
+                }
               } else {
                 // 展开：清掉折叠期留下的可见性压制，否则整段滑入是隐形的、收尾才"啪"出现。
                 clearRailHide();
@@ -754,9 +734,11 @@ struct WebPane: NSViewRepresentable {
                   savedGhost = null;
                   anim.shell = g;
                   anim.ghost = g.firstElementChild;
-                  g.firstElementChild.style.setProperty('transform',
-                    'translateX(-' + expandedWidth + 'px)', 'important');
+                  // 快照一直保持 closed 态（translateX(-100%)），挂回来先把这一版
+                  // 样式落定，afterClick 去掉 closed 它才会从窗外滑进来。
+                  g.firstElementChild.setAttribute('data-whaless-ghost-closed', '');
                   document.body.appendChild(g);
+                  void anim.ghost.offsetWidth;
                   html.setAttribute('data-whaless-frozen', '');
                 }
               }
@@ -774,14 +756,15 @@ struct WebPane: NSViewRepresentable {
               anim.timer = setTimeout(finish, durMs() * 1.6 + 300);
             },
 
-            // 点完按钮同步调用：有复制品就交给逐帧贴边（比 CSS 过渡准 1~3px）；
-            // 没有复制品（缓存还没建立）就让 CSS 过渡兜着走。
+            // 点完按钮同步调用：和真身同帧切换复制品的 closed 属性，
+            // 两边从同一次样式重算开始、同一条曲线滑，中缝不再靠每帧 JS 修。
             afterClick: function () {
               if (!anim || !anim.ghost) { return; }
-              anim.t0 = performance.now();
-              anim.lastLeft = -1;
-              anim.still = 0;
-              anim.raf = requestAnimationFrame(follow);
+              if (anim.collapsing) {
+                anim.ghost.setAttribute('data-whaless-ghost-closed', '');
+              } else {
+                anim.ghost.removeAttribute('data-whaless-ghost-closed');
+              }
             }
           };
 
